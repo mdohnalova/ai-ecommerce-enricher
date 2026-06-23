@@ -1,0 +1,35 @@
+{
+  "processing_date": "2026-06-19 21:58:14",
+  "product_count": 4,
+  "total_processing_seconds": 7.43,
+  "products": [
+    {
+      "original_name": "!!! BOTY ADIDAS TERREX - DOPRAVA ZDARMA !!!",
+      "clean_name": "boty adidas terrex",
+      "ai_description": "Boty Adidas Terrex jsou navrženy pro každého, kdo chce zdolávat přírodu bez kompromisů. Vynikající přilnavá podrážka a odolný svršek zajistí spolehlivou oporu na kluzkém terénu i v nepřízni počasí. Investujte do obuvi, která vás dostane tam, kam jiné boty nedojdou.",
+      "keywords": ["adidas terrex", "outdoorová obuv", "trekingové boty"],
+      "processing_speed_seconds": 1.89
+    },
+    {
+      "original_name": "NIKE AIR MAX 90 ** AKCE!! ** SLEVA 30%",
+      "clean_name": "nike air max 90",
+      "ai_description": "Nike Air Max 90 je ikonická teniска, která spojuje legendární streetwear styl s výjimečným pohodlím díky vzduchové tlumicí jednotce v podpatku. Klasický design s odvážnými barevnými bloky z vás udělá středobod pozornosti ať v parku, tak ve městě. Oblékněte historii sneaker kultury a kráčejte v botách, jež nikdy nevyjdou z módy.",
+      "keywords": ["nike air max 90", "tenisky nike", "sneakers klasika"],
+      "processing_speed_seconds": 1.97
+    },
+    {
+      "original_name": "??? Samsung Galaxy S24 - HIT SEZÓNY ???",
+      "clean_name": "samsung galaxy s24",
+      "ai_description": "Samsung Galaxy S24 přináší do vašich rukou výkon vlajkové lodi s AI funkcemi, které mění způsob, jak fotíte, pracujete a komunikujete. Oslnivý 6,2palcový Dynamic AMOLED displej s adaptivní obnovovací frekvencí 120 Hz nabídne plynulý a živý vizuální zážitek. Pořiďte si smartphone, který myslí spolu s vámi a vydrží celý den na jedno nabití.",
+      "keywords": ["samsung galaxy s24", "chytrý telefon samsung", "android flagship 2024"],
+      "processing_speed_seconds": 1.74
+    },
+    {
+      "original_name": "Sluchátka Sony WH-1000XM5",
+      "clean_name": "sluchátka sony wh - 1000xm5",
+      "ai_description": "Sluchátka Sony WH-1000XM5 nastavují nový standard pro bezdrátová sluchátka s aktivním potlačením hluku, které pohltí okolní ruch kanceláře i hluk přeplněného vlaku. Prémiové ovladače zajistí bohatý zvuk s hlubokými basy a křišťálově čistými výškami, zatímco výdrž baterie až 30 hodin vás vydrží od rána do noci. Dopřejte svým uším absolutní ticho a hudbu v té nejčistší podobě.",
+      "keywords": ["sony wh-1000xm5", "sluchátka s ANC", "bezdrátová sluchátka sony"],
+      "processing_speed_seconds": 1.83
+    }
+  ]
+}
