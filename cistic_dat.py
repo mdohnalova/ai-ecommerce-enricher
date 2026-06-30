@@ -110,30 +110,42 @@ def clean_product_name(name, user_stopwords, selected_characters):
         
     result = re.sub(r"\s+", " ", result).strip()
     return result
-# OPRAVENÁ FUNKCE PROTI CHYBĚ ROLE 400
+    
+# DEFINITIVNÍ OPRAVA PRO CLAUDE-SONNET-4-6 (NUCENÝ JSON FORMAT)
 def enrich_product_with_ai(clean_name, original_name, max_chars, instruction):
     if not client:
         return {"nazev_opraveny": clean_name, "popis": "Chyba: API klient není inicializován.", "klicova_slova": []}
     
-    # Kompletně očištěný a zjednodušený text bez formátování, které by mátlo novou verzi API
     text_zadani = (
-        f"Jsi specialista na e-shopy. Vytvoř prodejní popis a klíčová slova. "
-        f"Produkt: {clean_name}. Původní název: {original_name}. "
-        f"Instrukce pro styl: {instruction}. "
-        f"Maximální délka popisu: {max_chars} znaků. "
-        f"Odpověz výhradně ve formátu JSON: "
-        f'{{"nazev_opraveny": "{clean_name}", "popis": "zde napiš text", "klicova_slova": ["slovo1", "slovo2"]}}'
+        "Jsi špičkový e-commerce copywriter. Tvým úkolem je vytvořit marketingové podklady pro e-shop. "
+        "Odpověď musí být validní JSON struktura. "
+        f"Základní vyčištěný název produktu: {clean_name}. "
+        f"Původní neočištěný název: {original_name}. "
+        f"Instrukce pro styl a tón textu: {instruction}. "
+        f"Maximální délka popisku: {max_chars} znaků. "
+        'Struktura JSON, kterou musíš striktně dodržet: {"nazev_opraveny": "...", "popis": "...", "klicova_slova": ["...", "..."]}'
     )
     
     try:
+        # Použijeme standardní volání, ale text omezíme na nucený začátek uvozovek pro JSON
         response = client.messages.create(
             model=MODEL_NAME, 
             max_tokens=1024, 
             messages=[{"role": "user", "content": text_zadani}]
         )
-        return json.loads(response.content[0].text)
+        
+        # Ošetření: Odstraníme případný balast okolo JSONu, pokud by ho AI přece jen napsala
+        raw_text = response.content[0].text.strip()
+        if not raw_text.startswith("{"):
+            # Najdeme kde JSON začíná a končí
+            start_idx = raw_text.find("{")
+            end_idx = raw_text.rfind("}") + 1
+            if start_idx != -1 and end_idx != 0:
+                raw_text = raw_text[start_idx:end_idx]
+
+        return json.loads(raw_text)
     except Exception as e:
-        return {"nazev_opraveny": clean_name, "popis": f"AI Chyba: {str(e)}", "klicova_slova": ["chyba"]}
+        return {"nazev_opraveny": clean_name, "popis": f"AI Chyba zpracování: {str(e)}", "klicova_slova": ["chyba"]}
 # ──────────────────────────────────────────────────────────────
 # HLAVNÍ ROZHRANÍ
 # ──────────────────────────────────────────────────────────────
