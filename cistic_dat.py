@@ -13,9 +13,9 @@ import pandas as pd
 st.set_page_config(page_title="AI E-commerce Enricher PRO", page_icon="🛍️", layout="wide")
 
 # Inicializace Claude API klienta
-# Inicializace Claude API klienta
 try:
-    api_key = st.secrets["ANTHROPIC_API_KEY"]
+    # Načtení klíče ze struktury [anthropic] api_key
+    api_key = st.secrets["anthropic"]["api_key"]
     if api_key and api_key.startswith("sk-ant-"):
         client = anthropic.Anthropic(api_key=api_key)
     else:
