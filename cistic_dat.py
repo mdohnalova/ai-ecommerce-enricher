@@ -110,31 +110,29 @@ def clean_product_name(name, user_stopwords, selected_characters):
         
     result = re.sub(r"\s+", " ", result).strip()
     return result
-
-# OSTRÉ VOLÁNÍ AI SE ZABEZPEČENÍM PROTI CHYBĚ 400
+# OPRAVENÁ FUNKCE PROTI CHYBĚ ROLE 400
 def enrich_product_with_ai(clean_name, original_name, max_chars, instruction):
     if not client:
         return {"nazev_opraveny": clean_name, "popis": "Chyba: API klient není inicializován.", "klicova_slova": []}
     
-    # Sloučili jsme instrukce do jednoho balíku, aby API neházelo chybu "System prompts are not supported"
-    ujednoceny_prompt = (
-        "Jsi špičkový SEO a copywriter specialista pro e-shopy. Odpovědi vracej striktně v platném JSON formátu.\n\n"
-        f"Základní vyčištěný název produktu: {clean_name}\n"
-        f"Původní neočištěný název pro kontext: {original_name}\n"
-        f"Instrukce pro tvorbu popisku a úpravu: {instruction}\n"
-        f"Maximální délka popisku: {max_chars} znaků.\n"
-        'Odpověz striktně jako JSON v tomto formátu: {"nazev_opraveny": "...", "popis": "...", "klicova_slova": ["...", "...", "..."]}'
+    # Kompletně očištěný a zjednodušený text bez formátování, které by mátlo novou verzi API
+    text_zadani = (
+        f"Jsi specialista na e-shopy. Vytvoř prodejní popis a klíčová slova. "
+        f"Produkt: {clean_name}. Původní název: {original_name}. "
+        f"Instrukce pro styl: {instruction}. "
+        f"Maximální délka popisu: {max_chars} znaků. "
+        f"Odpověz výhradně ve formátu JSON: "
+        f'{{"nazev_opraveny": "{clean_name}", "popis": "zde napiš text", "klicova_slova": ["slovo1", "slovo2"]}}'
     )
     
     try:
         response = client.messages.create(
             model=MODEL_NAME, 
             max_tokens=1024, 
-            messages=[{"role": "user", "content": ujednoceny_prompt}]
+            messages=[{"role": "user", "content": text_zadani}]
         )
         return json.loads(response.content[0].text)
     except Exception as e:
-        # Pokud AI přesto selže, vypíšeme skutečnou chybu do tabulky
         return {"nazev_opraveny": clean_name, "popis": f"AI Chyba: {str(e)}", "klicova_slova": ["chyba"]}
 # ──────────────────────────────────────────────────────────────
 # HLAVNÍ ROZHRANÍ
