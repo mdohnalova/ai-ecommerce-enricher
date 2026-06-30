@@ -23,7 +23,7 @@ except Exception:
     client = None
 
 # Použijeme aktuální doporučený model od Anthropicu
-MODEL_NAME = "claude-3-5-sonnet-latest"
+MODEL_NAME = "claude-3-5-sonnet-20241022"
 
 # ──────────────────────────────────────────────────────────────
 # KROK 1: ČISTIČ NÁZVŮ PRODUKTŮ (Regex)
