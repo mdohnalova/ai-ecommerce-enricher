@@ -91,11 +91,23 @@ def enrich_product_with_ai(clean_name):
         return get_mock_data(clean_name)
 
 def get_mock_data(clean_name):
-    """Pomocná funkce pro generování realistických ukázkových dat při výpadku klíče/modelu"""
+    """Dynamická simulace, která generuje unikátní popisy podle typu produktu"""
     words = clean_name.split()
-    keyword_suggestions = words[:3] if len(words) >= 3 else [clean_name, "e-commerce", "top produkt"]
+    keyword_suggestions = words[:3] if len(words) >= 3 else [clean_name, "e-commerce", "top-produkt"]
+    
+    # Detekce kategorií pro chytřejší text, pokud by reálné AI selhalo
+    if "boty" in clean_name or "nike" in clean_name or "adidas" in clean_name:
+        popis = f"Prémiová obuv {clean_name.title()} přináší maximální pohodlí a moderní styl pro každý váš krok. Navrženo s důrazem na odolnost materiálů a ergonomický tvar, který podrží při sportu i běžném nošení."
+    elif "samsung" in clean_name or "galaxy" in clean_name or "phone" in clean_name:
+        popis = f"Chytrý telefon {clean_name.title()} kombinuje nekompromisní výkon s elegantním designem. Nabízí špičkový displej s věrnými barvami, pokročilou soustavu fotoaparátů a baterii, která vás nenechá ve štechu."
+    elif "sluchatka" in clean_name or "sony" in clean_name:
+        popis = f"Bezdrátová sluchátka {clean_name.title()} vás obklopí krystalicky čistým zvukem. Díky pokročilému potlačení okolního hluku a polstrovaným náušníkům si užijete oblíbenou hudbu i dlouhé hovory v naprostém pohodlí."
+    else:
+        # Univerzální, ale personalizovaný popis pro jakákoliv vlastní data uživatele
+        popis = f"Produkt {clean_name.title()} představuje skvěle vyvážený poměr mezi cenou a nabízeným výkonem. Ideální řešení pro každodenní efektivní využití, které spolehlivě splní veškerá vaše očekávání."
+
     return {
-        "popis": f"Tento špičkový produkt '{clean_name.title()}' představuje ideální volbu pro každého, kdo hledá maximální kvalitu a spolehlivost. Svým moderním zpracováním překonává standardy ve své třídě a zaručuje dlouhou životnost při každodenním používání.",
+        "popis": popis,
         "klicova_slova": keyword_suggestions
     }
 
