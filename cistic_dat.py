@@ -111,13 +111,14 @@ def clean_product_name(name, user_stopwords, selected_characters):
     result = re.sub(r"\s+", " ", result).strip()
     return result
 
-# OSTRÉ VOLÁNÍ AI BEZ FALOŠNÝCH TEXTŮ
+# OSTRÉ VOLÁNÍ AI SE ZABEZPEČENÍM PROTI CHYBĚ 400
 def enrich_product_with_ai(clean_name, original_name, max_chars, instruction):
     if not client:
         return {"nazev_opraveny": clean_name, "popis": "Chyba: API klient není inicializován.", "klicova_slova": []}
     
-    system_prompt = "Jsi špičkový SEO a copywriter specialista pro e-shopy. Odpovědi vracej striktně v platném JSON formátu."
-    user_prompt = (
+    # Sloučili jsme instrukce do jednoho balíku, aby API neházelo chybu "System prompts are not supported"
+    ujednoceny_prompt = (
+        "Jsi špičkový SEO a copywriter specialista pro e-shopy. Odpovědi vracej striktně v platném JSON formátu.\n\n"
         f"Základní vyčištěný název produktu: {clean_name}\n"
         f"Původní neočištěný název pro kontext: {original_name}\n"
         f"Instrukce pro tvorbu popisku a úpravu: {instruction}\n"
@@ -129,14 +130,12 @@ def enrich_product_with_ai(clean_name, original_name, max_chars, instruction):
         response = client.messages.create(
             model=MODEL_NAME, 
             max_tokens=1024, 
-            system=system_prompt, 
-            messages=[{"role": "user", "content": user_prompt}]
+            messages=[{"role": "user", "content": ujednoceny_prompt}]
         )
         return json.loads(response.content[0].text)
     except Exception as e:
-        # Pokud AI selže (např. kvůli kreditu), vypíšeme skutečnou chybu do tabulky
+        # Pokud AI přesto selže, vypíšeme skutečnou chybu do tabulky
         return {"nazev_opraveny": clean_name, "popis": f"AI Chyba: {str(e)}", "klicova_slova": ["chyba"]}
-
 # ──────────────────────────────────────────────────────────────
 # HLAVNÍ ROZHRANÍ
 # ──────────────────────────────────────────────────────────────
