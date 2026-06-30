@@ -3,6 +3,7 @@ import anthropic
 import json
 import re
 import time
+import random
 import pandas as pd
 
 # ============================================================
@@ -30,7 +31,6 @@ st.sidebar.header("⚙️ Konfigurace filtrů na míru")
 
 st.sidebar.subheader("1. Výběr znaků k odstranění")
 
-# Předdefinovaný multiselect
 available_chars = ["!", "?", "*", "#", "@", "~", "%", "&", "$", "_", "=", "+", "^", "<", ">", "[", "]", "{", "}", "\"", "'"]
 selected_chars = st.sidebar.multiselect(
     "Vyberte přednastavené znaky k odstranění:",
@@ -38,17 +38,14 @@ selected_chars = st.sidebar.multiselect(
     default=["!", "?", "*", "#", "@"]
 )
 
-# Textové pole pro vlastní dodatečné znaky
 custom_chars_input = st.sidebar.text_input(
     "Dopište další znaky bez oddělování (např. §°×):",
     value=""
 )
 
-# Sloučení vybraných znaků z multiselectu a ručně dopsaných z text inputu
 all_selected_chars = list(selected_chars) + list(custom_chars_input)
 all_selected_chars = list(set(all_selected_chars))
 
-# Možnost zapnout/vypnout chytré mazání marketingových procent a čísel
 clean_marketing_percentages = st.sidebar.checkbox("Chytře mazat slevová procenta (např. Sleva 30%)", value=True)
 clean_numbers = st.sidebar.checkbox("Všechna samostatná čísla", value=False)
 
@@ -71,7 +68,7 @@ if prompt_mode == "Rychlé předvolby tónu":
         "Tón e-commerce popisku:",
         ["Profesionální a důvěryhodný", "Přátelský a lidský", "Úderný a prodejní (Hard-sell)", "Eko / Udržitelný styl"]
     )
-    ai_instruction = f"Tón popisku musí být: {ai_tone}."
+    ai_instruction = f"Tón popisku must be: {ai_tone}."
 else:
     ai_tone = "Vlastní prompt"
     ai_instruction = st.sidebar.text_area(
@@ -82,7 +79,6 @@ else:
 max_char_length = st.sidebar.slider("Maximální délka popisku (znaků):", min_value=50, max_value=1000, value=250)
 
 st.sidebar.write("---")
-# PŘIDÁNÍ TLAČÍTKA NA SPODEK LEVÉHO PANELU
 run_sidebar = st.sidebar.button("🚀 Spustit kompletní transformaci", key="sidebar_run_btn", use_container_width=True)
 
 # ──────────────────────────────────────────────────────────────
@@ -148,6 +144,7 @@ st.caption("Verze: **ENTERPRISE DEMO**")
 tab1, tab2 = st.tabs(["📁 Nahrát soubor (CSV / Excel)", "✍️ Ruční zadání textu"])
 full_products_count = 0
 final_products_list = []
+demo_selection_strategy = "Prvních 20 produktů"
 
 with tab1:
     uploaded_file = st.file_uploader("Vyberte soubor s produkty", type=["csv", "xlsx"])
@@ -168,11 +165,20 @@ with tab1:
             
             st.write("---")
             st.subheader("📊 Statistiky nahraného souboru")
+            
             col_stat1, col_stat2 = st.columns(2)
             with col_stat1:
-                st.metric(label="Celkový počet nalezených produktů", value=f"{full_products_count} ks")
+                st.metric(label="Celkový počet nalezených produktů v souboru", value=f"{full_products_count} ks")
             with col_stat2:
                 st.info(f"Analyzovaný sloupec: **{column_with_names}**")
+            
+            # --- JASNÉ DEMO UPOZORNĚNÍ IHNED PO NAHRÁNÍ SOUBORU ---
+            if full_products_count > 20:
+                st.warning(f"💡 **Omezení bezplatné verze:** V souboru bylo úspěšně nalezeno všech **{full_products_count}** produktů. V rámci Demo režimu však můžete jednorázově otestovat transformaci maximálně na **20 produktech**.")
+                demo_selection_strategy = st.radio(
+                    "Vyberte, jakých 20 vzorků chcete z nahrávky vyzkoušet:",
+                    ["Prvních 20 produktů", "Náhodný výběr 20 produktů"]
+                )
                 
         except Exception as e:
             st.error(f"Chyba při čtení souboru: {e}")
@@ -191,19 +197,22 @@ if "total_time" not in st.session_state:
 if "was_truncated" not in st.session_state:
     st.session_state.was_truncated = False
 
-# Hlavní spouštěcí tlačítko uprostřed
 run_main = st.button("🚀 Spustit kompletní transformaci dat", type="primary")
 
 # ──────────────────────────────────────────────────────────────
-# SPUŠTĚNÍ TRANSFORMACE (REAGUJE NA OBĚ TLAČÍTKA)
+# SPUŠTĚNÍ TRANSFORMACE
 # ──────────────────────────────────────────────────────────────
 if run_main or run_sidebar:
     if not final_products_list:
         st.error("Žádná data k analýze.")
     else:
+        # TADY SE VOLÍ STRATEGIE PODLE VOLBY UŽIVATELE
         if len(final_products_list) > 20:
-            processing_list = final_products_list[:20]
             st.session_state.was_truncated = True
+            if demo_selection_strategy == "Náhodný výběr 20 produktů":
+                processing_list = random.sample(final_products_list, 20)
+            else:
+                processing_list = final_products_list[:20]
         else:
             processing_list = final_products_list
             st.session_state.was_truncated = False
@@ -223,8 +232,6 @@ if run_main or run_sidebar:
             kw_data = ai_data.get("klicova_slova", [])
             kw_str = ", ".join(kw_data) if isinstance(kw_data, list) else str(kw_data)
             
-            # --- UNIVERZÁLNÍ AUTOMATICKÝ AUDIT NEZVOLENÝCH ZNAKŮ ---
-            # Najde všechno, co není text, číslo, česká diakritika, procento, mezera, tečka, čárka nebo pomlčka
             suspicious_chars = re.findall(r"[^\w\s.,%\-\u00C0-\u017F]", str(clean_name))
             
             if suspicious_chars:
@@ -261,7 +268,7 @@ if st.session_state.processed_df is not None:
     st.subheader("✨ Výsledky transformace")
     
     if st.session_state.was_truncated:
-        st.warning(f"⚠️ **Oznámení Demo verze:** Váš soubor obsahuje celkem {full_products_count} produktů. V rámci bezplatného režimu bylo zpracováno prvních **20 ukázkových položek**.")
+        st.warning(f"⚠️ **Ukázka zpracování dat dokončena:** Ze souboru o celkovém počtu {full_products_count} položek bylo na základě vaší volby vybráno a obohaceno 20 vzorků. Kompletní databázi vám rádi odemkneme v plné verzi.")
     else:
         st.success("✅ Všechny produkty ze souboru byly úspěšně zpracovány.")
         
