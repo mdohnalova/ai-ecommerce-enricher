@@ -4,10 +4,9 @@ import json
 import re
 import time
 import pandas as pd
-from datetime import datetime
 
 # ============================================================
-# PROJECT:  AI E-Commerce Enricher (Interactive Data Selection)
+# PROJECT:  AI E-Commerce Enricher (Smart Bulk Processing)
 # ============================================================
 
 st.set_page_config(page_title="AI E-commerce Enricher PRO", page_icon="🛍️", layout="wide")
@@ -25,7 +24,7 @@ except Exception:
 MODEL_NAME = "claude-3-5-sonnet-20240620"
 
 # ──────────────────────────────────────────────────────────────
-# BOČNÍ PANEL: NASTAVENÍ ČIŠTĚNÍ A SHOPTET LIMITŮ
+# BOČNÍ PANEL: NASTAVENÍ ČIŠTĚNÍ A LIMITŮ
 # ──────────────────────────────────────────────────────────────
 st.sidebar.header("⚙️ Konfigurace filtrů na míru")
 
@@ -96,31 +95,46 @@ def get_intelligent_mock(clean_name, tone, max_chars):
 st.title("🛍️ AI E-commerce Enricher & Data Cleaner PRO")
 
 tab1, tab2 = st.tabs(["📁 Nahrát soubor (CSV / Excel)", "✍️ Ruční zadání textu"])
-processed_df = None
+final_products_list = []
 
 with tab1:
     uploaded_file = st.file_uploader("Vyberte soubor s produkty", type=["csv", "xlsx"])
     if uploaded_file is not None:
         try:
             if uploaded_file.name.endswith('.csv'):
-                # OPRAVA: sep=None s engine='python' automaticky detekuje středníky i čárky!
                 df_input = pd.read_csv(uploaded_file, sep=None, engine='python', encoding='utf-8-sig')
             else:
                 df_input = pd.read_excel(uploaded_file)
             
             column_with_names = st.selectbox("Vyberte sloupec, který obsahuje názvy produktů:", df_input.columns)
             
-            # Příprava tabulky s checkboxy pro výběr
-            raw_list = df_input[column_with_names].dropna().astype(str).tolist()
-            processed_df = pd.DataFrame({
-                "Zpracovat": [True] * len(raw_list),
-                "Původní název produktu": raw_list
-            })
+            # Filtrace prázdných buněk a načtení do čistého listu
+            series_products = df_input[column_with_names].dropna().astype(str).str.strip()
+            series_products = series_products[series_products != ""]
             
-            st.write("### 🎯 Vyberte zaškrtnutím produkty, které chcete poslat do AI:")
-            # Interaktivní editor tabulky
-            edited_df = st.data_editor(processed_df, use_container_width=True, hide_index=True)
+            total_rows = len(series_products)
+            final_products_list = series_products.tolist()
             
+            # Elegantní informační boxy místo obří tabulky
+            st.write("---")
+            st.subheader("📊 Statistiky nahraného souboru")
+            col_stat1, col_stat2 = st.columns(2)
+            with col_stat1:
+                st.metric(label="Počet nalezených produktů (plných buněk)", value=f"{total_rows} ks")
+            with col_stat2:
+                st.info(f"Sloupec úspěšně spárován: **{column_with_names}**")
+            
+            # Ochranný prvek pro velké datasety
+            st.write("### ⚙️ Rozsah zpracování dat")
+            process_mode = st.radio(
+                "Kolik produktů chcete poslat do AI k obohacení?",
+                ["Otestovat vzorek (prvních 5 produktů)", "Zpracovat kompletně celý soubor"]
+            )
+            
+            if "Otestovat" in process_mode:
+                final_products_list = final_products_list[:5]
+                st.caption("💡 Ideální pro kontrolu kvality textů před spuštěním hromadného importu.")
+                
         except Exception as e:
             st.error(f"Chyba při čtení souboru: {e}")
 
@@ -128,21 +142,18 @@ with tab2:
     if uploaded_file is None:
         sample_data = "!!! BOTY ADIDAS TERREX - DOPRAVA ZDARMA !!!\nsilonové punčochy dnes za 30% dolů"
         text_input = st.text_area("Vložte názvy (každý na nový řádek):", value=sample_data, height=120)
-        manual_list = [line.strip() for line in text_input.split("\n") if line.strip()]
-        edited_df = pd.DataFrame({"Zpracovat": [True] * len(manual_list), "Původní název produktu": manual_list})
+        final_products_list = [line.strip() for line in text_input.split("\n") if line.strip()]
 
-# Spuštění akce
+# Tlačítko pro spuštění
 if st.button("🚀 Spustit kompletní transformaci dat", type="primary"):
-    # Vyfiltrujeme pouze řádky, kde uživatel nechal zaškrtnuté políčko "Zpracovat"
-    selected_products = edited_df[edited_df["Zpracovat"] == True]["Původní název produktu"].tolist()
-    
-    if not selected_products:
-        st.error("Žádné produkty nebyly vybrány ke zpracování.")
+    if not final_products_list:
+        st.error("Žádná data k analýze. Nahrajte soubor nebo vložte text.")
     else:
         results = []
         progress_bar = st.progress(0)
         
-        for idx, original_name in enumerate(selected_products):
+        # Zpracování vybraného počtu položek
+        for idx, original_name in enumerate(final_products_list):
             clean_name = clean_product_name(original_name, custom_stopwords)
             ai_data = enrich_product_with_ai(clean_name, original_name, max_char_length)
             
@@ -157,10 +168,19 @@ if st.button("🚀 Spustit kompletní transformaci dat", type="primary"):
                 "Délka (znaků)": len(ai_data.get("popis", "")),
                 "SEO Klíčová slova": kw_str
             })
-            progress_bar.progress((idx + 1) / len(selected_products))
+            progress_bar.progress((idx + 1) / len(final_products_list))
             
         if results:
             st.write("---")
             st.subheader("📊 Výsledná data pro e-shop")
             df_results = pd.DataFrame(results)
             st.dataframe(df_results, use_container_width=True)
+            
+            # Export do CSV
+            csv_buffer = df_results.to_csv(index=False, encoding='utf-8-sig')
+            st.download_button(
+                label="📥 Stáhnout vyčištěné Shoptet CSV",
+                data=csv_buffer,
+                file_name="shoptet_clean_data.csv",
+                mime="text/csv"
+            )
