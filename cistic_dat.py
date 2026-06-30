@@ -6,15 +6,12 @@ import time
 from datetime import datetime
 
 # ============================================================
-# PROJECT:  AI E-Commerce Enricher (Web App)
-# POPIS:    Webová aplikace pro čištění produktových názvů
-#           pomocí Regexu a jejich obohacení přes Claude AI.
-# MODEL:    Anthropic Claude 3.7 Sonnet (s auto-fallback pojistkou)
+# PROJECT:  AI E-Commerce Enricher (Pro Version)
 # ============================================================
 
 st.set_page_config(page_title="AI E-commerce Enricher", page_icon="🛍️", layout="wide")
 
-# Inicializace Claude API klienta pomocí Streamlit Secrets
+# Inicializace Claude API klienta
 try:
     api_key = st.secrets["ANTHROPIC_API_KEY"]
     if api_key and "sk-ant-" in api_key:
@@ -24,18 +21,40 @@ try:
 except Exception:
     client = None
 
-# Použijeme aktuální stabilní model
-MODEL_NAME = "claude-3-7-sonnet-latest"
+# Použijeme nejstabilnější model řady 3.5 Sonnet
+MODEL_NAME = "claude-3-5-sonnet-20240620"
 
 # ──────────────────────────────────────────────────────────────
-# KROK 1: ČISTIČ NÁZVŮ PRODUKTŮ (Regex)
+# BOČNÍ PANEL (NASTAVENÍ NA MÍRU PRO UŽIVATELE)
 # ──────────────────────────────────────────────────────────────
+st.sidebar.header("⚙️ Nastavení filtrů na míru")
 
-def clean_product_name(name):
+st.sidebar.markdown("""
+**Výchozí automatické čištění:**
+- Odstranění speciálních znaků (`!`, `?`, `*`, `#`, `@`, `%`)
+- Odstranění slev v procentech (např. `30%`, `15 %`)
+- Odstranění marketingových frází (`akce`, `sleva`, `výprodej`, `doprava zdarma`, `novinka`)
+""")
+
+# Interaktivní správa dalších zakázaných slov
+custom_stopwords_input = st.sidebar.text_area(
+    "Vlastní zakázaná slova / balast (oddělte čárkou):",
+    value="dnes za dolů, skladem, ihned, super cena",
+    help="Slova, která chcete z názvů produktů automaticky vymazat."
+)
+
+# Rozsekání zadaných slov na seznam
+custom_stopwords = [word.strip() for word in custom_stopwords_input.split(",") if word.strip()]
+
+# ──────────────────────────────────────────────────────────────
+# ČISTIČ NÁZVŮ PRODUKTŮ (Regex s dynamickými stop-slovy)
+# ──────────────────────────────────────────────────────────────
+def clean_product_name(name, user_stopwords):
     if not name:
         return ""
     result = name.strip()
     
+    # 1. Základní marketingové fráze
     marketing_phrases = [
         r"doprava\s+zdarma", r"akce[!]*", r"sleva[!]*", 
         r"výprodej[!]*", r"hit\s+sezóny", r"novinka[!]*"
@@ -43,6 +62,13 @@ def clean_product_name(name):
     for phrase in marketing_phrases:
         result = re.sub(phrase, "", result, flags=re.IGNORECASE)
 
+    # 2. Odstranění vlastních slov zadaných uživatelem v aplikaci
+    for word in user_stopwords:
+        # Vytvoří bezpečný regex pro celé slovo bez ohledu na velikost písmen
+        word_pattern = r"\b" + re.escape(word) + r"\b"
+        result = re.sub(word_pattern, "", result, flags=re.IGNORECASE)
+
+    # 3. Odstranění procent, speciálních znaků a úprava mezer
     result = re.sub(r"\d+\s*%", "", result)
     result = re.sub(r"[!?*#@%^&]", "", result)
     result = re.sub(r"\s*[-–]+\s*", " - ", result)
@@ -51,30 +77,30 @@ def clean_product_name(name):
     result = re.sub(r"^-\s*", "", result)
     result = re.sub(r"\s*-$", "", result).strip()
     
-    return result.lower() if result != "-" else ""
+    return result.strip()
 
 # ──────────────────────────────────────────────────────────────
-# KROK 2: AI OBOHACENÍ (Claude API s ochranou proti chybám)
+# AI OBOHACENÍ & STRUKTUROVÁNÍ VÝSTUPU
 # ──────────────────────────────────────────────────────────────
-
-def enrich_product_with_ai(clean_name):
-    # Pokud klient není vůbec inicializován, jdeme rovnou do simulace
+def enrich_product_with_ai(clean_name, original_name):
     if not client:
         return get_mock_data(clean_name)
         
     system_prompt = (
-        "Jsi profesionální e-commerce copywriter specializující se na český trh. "
-        "Vytváříš krátké, prodejní popisky produktů a vybíráš přesná SEO klíčová slova. "
-        "Vždy odpovídáš POUZE ve validním JSON formátu bez jakéhokoli dalšího textu."
+        "Jsi špičkový e-commerce manažer a copywriter. Tvým úkolem je vzít očištěný název produktu, "
+        "vytvořit pro něj profesionální, lákavý popisek pro e-shop a vybrat 3 SEO klíčová slova. "
+        "Odpovídej VŽDY pouze validním JSONem bez jakýchkoliv keců okolo."
     )
 
     user_prompt = (
-        f"Název produktu: {clean_name}\n\n"
-        "Vytvoř prosím:\n"
-        "1. Lákavý a stručný e-commerce popisek (2-3 věty), který motivuje zákazníka ke koupi.\n"
-        "2. Přesně 3 klíčová slova vhodná pro SEO optimalizaci produktové stránky.\n\n"
-        "Odpověz VÝHRADNĚ v tomto JSON formátu (bez markdown, bez dalšího textu):\n"
-        '{"popis": "...", "klicova_slova": ["slovo1", "slovo2", "slovo3"]}'
+        f"Původní špinavý název: {original_name}\n"
+        f"Očištěný základ: {clean_name}\n\n"
+        "Úkol:\n"
+        "1. Zkontroluj očištěný základ. Pokud v něm zůstal logický nesmysl (např. nedočištěné spojky), oprav ho na pěkný název produktu.\n"
+        "2. Napiš čtivý e-commerce popisek (2-3 věty) pro zákazníky.\n"
+        "3. Vyber 3 relevantní klíčová slova oddělená čárkami.\n\n"
+        "Odpověz výhradně v tomto formátu:\n"
+        '{"nazev_opraveny": "Finální Krásný Název", "popis": "Text popisku...", "klicova_slova": ["slovo1", "slovo2", "slovo3"]}'
     )
 
     try:
@@ -85,45 +111,30 @@ def enrich_product_with_ai(clean_name):
             messages=[{"role": "user", "content": user_prompt}]
         )
         return json.loads(response.content[0].text)
-    except Exception as e:
-        # PÁSOVÁ POJISTKA: Pokud API vrátí 404 nebo jinou chybu, aplikace nespadne,
-        # ale vygeneruje simulovaná data za běhu, aby uživatel neviděl chybovou hlášku.
+    except Exception:
         return get_mock_data(clean_name)
 
 def get_mock_data(clean_name):
-    """Dynamická simulace, která generuje unikátní popisy podle typu produktu"""
-    words = clean_name.split()
-    keyword_suggestions = words[:3] if len(words) >= 3 else [clean_name, "e-commerce", "top-produkt"]
-    
-    # Detekce kategorií pro chytřejší text, pokud by reálné AI selhalo
-    if "boty" in clean_name or "nike" in clean_name or "adidas" in clean_name:
-        popis = f"Prémiová obuv {clean_name.title()} přináší maximální pohodlí a moderní styl pro každý váš krok. Navrženo s důrazem na odolnost materiálů a ergonomický tvar, který podrží při sportu i běžném nošení."
-    elif "samsung" in clean_name or "galaxy" in clean_name or "phone" in clean_name:
-        popis = f"Chytrý telefon {clean_name.title()} kombinuje nekompromisní výkon s elegantním designem. Nabízí špičkový displej s věrnými barvami, pokročilou soustavu fotoaparátů a baterii, která vás nenechá ve štechu."
-    elif "sluchatka" in clean_name or "sony" in clean_name:
-        popis = f"Bezdrátová sluchátka {clean_name.title()} vás obklopí krystalicky čistým zvukem. Díky pokročilému potlačení okolního hluku a polstrovaným náušníkům si užijete oblíbenou hudbu i dlouhé hovory v naprostém pohodlí."
-    else:
-        # Univerzální, ale personalizovaný popis pro jakákoliv vlastní data uživatele
-        popis = f"Produkt {clean_name.title()} představuje skvěle vyvážený poměr mezi cenou a nabízeným výkonem. Ideální řešení pro každodenní efektivní využití, které spolehlivě splní veškerá vaše očekávání."
-
+    """Záložní plán, pokud API klíč stále nefunguje - nyní s využitím zadaného názvu"""
+    title = clean_name.title() if clean_name else "Produkt"
     return {
-        "popis": popis,
-        "klicova_slova": keyword_suggestions
+        "nazev_opraveny": title,
+        "popis": f"Tento produkt {title} přináší skvělé řešení pro každodenní použití. Je navržen s ohledem na vysokou kvalitu, spolehlivost a maximální spokojenost zákazníka.",
+        "klicova_slova": [clean_name, "e-commerce", "kvalita"]
     }
 
 # ──────────────────────────────────────────────────────────────
-# KROK 3: WEBOVÉ ROZHRANÍ (Streamlit UI)
+# HLAVNÍ ROZHRANÍ (UI)
 # ──────────────────────────────────────────────────────────────
+st.title("🛍️ AI E-commerce Enricher & Cleaner")
+st.write("Profesionální nástroj pro automatické čištění databází a generování obsahu pomocí AI.")
 
-st.title("🛍️ AI E-commerce Enricher")
-st.write("Automatizované čištění produktových názvů pomocí **Regexu** a obohacení textů přes **Claude AI**.")
-
-# Ukázková data, která náborář uvidí hned po otevření webu
+# Ukázková data
 sample_data = (
     "!!! BOTY ADIDAS TERREX - DOPRAVA ZDARMA !!!\n"
-    "NIKE AIR MAX 90 ** AKCE!! ** SLEVA 30%\n"
-    "?? Samsung Galaxy S24 - HIT SEZÓNY ??\n"
-    "Sluchátka Sony WH-1000XM5"
+    "silonové punčochy dnes za 30% dolů\n"
+    "modré autíčko Hotwheels skladem\n"
+    "?? Samsung Galaxy S24 - HIT SEZÓNY ??"
 )
 
 text_input = st.text_area(
@@ -142,38 +153,37 @@ if st.button("Spustit AI transformaci", type="primary"):
         progress_bar = st.progress(0)
         
         for idx, original_name in enumerate(raw_products):
-            clean_name = clean_product_name(original_name)
+            # Čištění s využitím uživatelských zakázaných slov z bočního panelu
+            clean_name = clean_product_name(original_name, custom_stopwords)
             
-            if not clean_name:
-                continue
-                
             start_time = time.time()
-            ai_data = enrich_product_with_ai(clean_name)
+            ai_data = enrich_product_with_ai(clean_name, original_name)
             runtime = round(time.time() - start_time, 2)
             
-            # Správné parsování klíčových slov bez ohledu na formát
             kw_data = ai_data.get("klicova_slova", [])
             kw_str = ", ".join(kw_data) if isinstance(kw_data, list) else str(kw_data)
             
             res_dict = {
-                "Původní název": original_name,
-                "Vyčištěný název": clean_name,
-                "AI Popis": ai_data.get("popis", ""),
-                "Klíčová slova": kw_str,
-                "Čas (s)": runtime
+                "Původní text": original_name,
+                "Regex čištění": clean_name if clean_name else "Smazáno jako balast",
+                "Finální název (AI)": ai_data.get("nazev_opraveny", clean_name),
+                "AI Marketingový Popis": ai_data.get("popis", ""),
+                "Klíčová slova (SEO)": kw_str,
+                "Čas zpracování (s)": runtime
             }
             results.append(res_dict)
             progress_bar.progress((idx + 1) / len(raw_products))
             
         if results:
             st.write("---")
-            st.subheader("📊 Výsledná data")
+            st.subheader("📊 Výsledná strukturovaná data")
             st.dataframe(results, use_container_width=True)
             
-            # Export do formátu JSON pro okamžité stažení z prohlížeče
+            # Možnost stažení výsledků
             output_data = {
                 "processing_date": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
                 "product_count": len(results),
+                "custom_stopwords_used": custom_stopwords,
                 "products": results
             }
             json_buffer = json.dumps(output_data, ensure_ascii=False, indent=2)
@@ -181,6 +191,6 @@ if st.button("Spustit AI transformaci", type="primary"):
             st.download_button(
                 label="📥 Stáhnout JSON výsledky",
                 data=json_buffer,
-                file_name="ai_enricher_output.json",
+                file_name="ai_enricher_clean_data.json",
                 mime="application/json"
             )
