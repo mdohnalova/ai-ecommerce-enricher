@@ -66,9 +66,9 @@ prompt_mode = st.sidebar.radio(
 if prompt_mode == "Rychlé předvolby tónu":
     ai_tone = st.sidebar.selectbox(
         "Tón e-commerce popisku:",
-        ["Profesionální a důvěryhodný", "Přátelský a lidský", "Úderný a prodejní (Hard-sell)", "Eko / Udržitelný styl"]
+        ["Profesionální a důvěryhodný", "Přátelský a lidský", "Úderný a prodejní (Hard-sell)", "Eko / Udržitelný style"]
     )
-    ai_instruction = f"Tón popisku must be: {ai_tone}."
+    ai_instruction = f"Tón popisku musí být: {ai_tone}."
 else:
     ai_tone = "Vlastní prompt"
     ai_instruction = st.sidebar.text_area(
@@ -172,7 +172,6 @@ with tab1:
             with col_stat2:
                 st.info(f"Analyzovaný sloupec: **{column_with_names}**")
             
-            # --- JASNÉ DEMO UPOZORNĚNÍ IHNED PO NAHRÁNÍ SOUBORU ---
             if full_products_count > 20:
                 st.warning(f"💡 **Omezení bezplatné verze:** V souboru bylo úspěšně nalezeno všech **{full_products_count}** produktů. V rámci Demo režimu však můžete jednorázově otestovat transformaci maximálně na **20 produktech**.")
                 demo_selection_strategy = st.radio(
@@ -206,7 +205,6 @@ if run_main or run_sidebar:
     if not final_products_list:
         st.error("Žádná data k analýze.")
     else:
-        # TADY SE VOLÍ STRATEGIE PODLE VOLBY UŽIVATELE
         if len(final_products_list) > 20:
             st.session_state.was_truncated = True
             if demo_selection_strategy == "Náhodný výběr 20 produktů":
@@ -259,7 +257,7 @@ if run_main or run_sidebar:
         st.session_state.processed_df = pd.DataFrame(results)
 
 # ──────────────────────────────────────────────────────────────
-# ZOBRAZENÍ VÝSLEDKŮ
+# ZOBRAZENÍ VÝSLEDKŮ S FILTREM SLOUPCŮ PRO EXPORT
 # ──────────────────────────────────────────────────────────────
 if st.session_state.processed_df is not None:
     df_results = st.session_state.processed_df
@@ -281,21 +279,37 @@ if st.session_state.processed_df is not None:
         saved_minutes = len(df_results) * 3
         st.metric(label="Ušetřený čas copywritera", value=f"~ {saved_minutes} min", delta="🔥 Efektivita")
     
-    st.write("### 📥 Export a sdílení dat")
-    col_btn1, col_btn2, col_btn3 = st.columns([2, 2, 3])
+    # ─── NOVINKA: VARIANTY SLOUPCŮ PRO EXPORT ───
+    st.write("---")
+    st.write("### 📥 Export a nastavení stahovaných dat")
     
-    with col_btn1:
-        csv_buffer = df_results.to_csv(index=False, encoding='utf-8-sig')
-        st.download_button(label="📥 Stáhnout Shoptet CSV", data=csv_buffer, file_name="shoptet_clean_data.csv", mime="text/csv", use_container_width=True)
-    with col_btn2:
-        json_buffer = json.dumps(df_results.to_dict(orient="records"), ensure_ascii=False, indent=2)
-        st.download_button(label="📥 Stáhnout kompletní JSON", data=json_buffer, file_name="shoptet_clean_data.json", mime="application/json", use_container_width=True)
-    with col_btn3:
-        st.button("🔗 Kopírovat odkaz pro sdílení výsledků", on_click=lambda: st.toast("Odkaz byl zkopírován do schránky!"), use_container_width=True)
+    # Multiselect přímo nad tlačítky pro stažení, kde si uživatel vybere, co chce v souboru nechat
+    export_columns = st.multiselect(
+        "Vyberte sloupce, které chcete zahrnout do výsledného exportu (CSV / JSON):",
+        options=list(df_results.columns),
+        default=list(df_results.columns)
+    )
+    
+    if not export_columns:
+        st.error("⚠️ Musíte vybrat alespoň jeden sloupec pro export.")
+    else:
+        # Filtrujeme dataframe na základě vybraných sloupců pro export
+        df_to_export = df_results[export_columns]
+        
+        col_btn1, col_btn2, col_btn3 = st.columns([2, 2, 3])
+        with col_btn1:
+            csv_buffer = df_to_export.to_csv(index=False, encoding='utf-8-sig')
+            st.download_button(label="📥 Stáhnout Shoptet CSV", data=csv_buffer, file_name="shoptet_clean_data.csv", mime="text/csv", use_container_width=True)
+        with col_btn2:
+            json_buffer = json.dumps(df_to_export.to_dict(orient="records"), ensure_ascii=False, indent=2)
+            st.download_button(label="📥 Stáhnout kompletní JSON", data=json_buffer, file_name="shoptet_clean_data.json", mime="application/json", use_container_width=True)
+        with col_btn3:
+            st.button("🔗 Kopírovat odkaz pro sdílení výsledků", on_click=lambda: st.toast("Odkaz byl zkopírován do schránky!"), use_container_width=True)
     
     st.write("---")
     st.subheader("📊 2. KROK KONTROLY: Audit a rychlá editace dat")
     st.info("💡 **Tip pro audit:** Kliknutím na záhlaví sloupce **🔍 Stav auditu** seřadíte položky tak, aby se řádky označené s **⚠️** posunuly nahoru a mohli jste je bleskově ručně opravit.")
     
+    # Datový editor zobrazuje vždy plnou tabulku pro pohodlnou editaci a kontrolu
     edited_df = st.data_editor(df_results, use_container_width=True)
     st.session_state.processed_df = pd.DataFrame(edited_df)
