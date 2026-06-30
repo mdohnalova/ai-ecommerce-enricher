@@ -30,13 +30,24 @@ st.sidebar.header("⚙️ Konfigurace filtrů na míru")
 
 st.sidebar.subheader("1. Výběr znaků k odstranění")
 
-# Dynamický výběr speciálních znaků kus po kusu + možnost doplnit vlastní
-available_chars = ["!", "?", "*", "#", "@", "~", "%", "&", "$", "_", "=", "+", "^"]
+# Předdefinovaný multiselect
+available_chars = ["!", "?", "*", "#", "@", "~", "%", "&", "$", "_", "=", "+", "^", "<", ">", "[", "]", "{", "}"]
 selected_chars = st.sidebar.multiselect(
-    "Vyberte nebo dopište speciální znaky k odstranění:",
+    "Vyberte přednastavené znaky k odstranění:",
     options=available_chars,
     default=["!", "?", "*", "#", "@"]
 )
+
+# --- KLÍČOVÁ OPRAVA: Textové pole pro vlastní dodatečné znaky ---
+custom_chars_input = st.sidebar.text_input(
+    "Dopište další znaky bez oddělování (např. §°×):",
+    value=""
+)
+
+# Sloučení vybraných znaků z multiselectu a ručně dopsaných z text inputu
+all_selected_chars = list(selected_chars) + list(custom_chars_input)
+# Odstranění duplicit, aby byl seznam čistý
+all_selected_chars = list(set(all_selected_chars))
 
 # Možnost zapnout/vypnout chytré mazání marketingových procent a čísel
 clean_marketing_percentages = st.sidebar.checkbox("Chytře mazat slevová procenta (např. Sleva 30%)", value=True)
@@ -79,27 +90,25 @@ def clean_product_name(name, user_stopwords, selected_characters):
         return ""
     result = str(name).strip()
     
-    # 1. CHYTRÉ MAZÁNÍ PROCENT: Pokud je aktivní, smaže procenta JEN tehdy, když jsou blízko stop-slov (Sleva 30%)
+    # 1. CHYTRÉ MAZÁNÍ PROCENT
     if clean_marketing_percentages:
         for word in user_stopwords:
-            # Hledá vzor: stop-slovo následované číslem s procentem (např. sleva 20%, akce 30%) nebo naopak
             pattern1 = r"\b" + re.escape(word) + r"\b\s*\d+\s*%"
             pattern2 = r"\d+\s*%\s*\b" + re.escape(word) + r"\b"
             result = re.sub(pattern1, "", result, flags=re.IGNORECASE)
             result = re.sub(pattern2, "", result, flags=re.IGNORECASE)
             
-    # 2. Odstranění samotných stop-slov bez procent
+    # 2. Odstranění stop-slov
     for word in user_stopwords:
         word_pattern = r"\b" + re.escape(word) + r"\b"
         result = re.sub(word_pattern, "", result, flags=re.IGNORECASE)
         
-    # 3. Odstranění uživatelem zvolených speciálních znaků (kus po kusu z multiselectu)
+    # 3. Odstranění všech sloučených speciálních znaků
     if selected_characters:
-        # Vytvoření bezpečného regexu pro vybrané znaky
         escaped_chars = "".join([re.escape(c) for c in selected_characters])
         result = re.sub(r"[" + escaped_chars + r"]", "", result)
         
-    # 4. Odstranění samostatných čísel (pokud je zaškrtnuto)
+    # 4. Odstranění samostatných čísel
     if clean_numbers:
         result = re.sub(r"\b\d+\b", "", result)
         
@@ -202,21 +211,20 @@ if st.button("🚀 Spustit kompletní transformaci dat", type="primary"):
         status_text = st.empty()
         start_bulk_time = time.time()
         
-        # Podezřelé znaky, které uživatel nenechal odstranit (pro audit krok)
         uncleaned_pattern = r"[~_=+\[\]{}|\\<>`«»]"
         
         for idx, original_name in enumerate(processing_list):
-            status_text.text(f"Zprocessed {idx + 1} z {len(processing_list)}...")
+            status_text.text(f"Zpracovávám {idx + 1} z {len(processing_list)}...")
             
-            # Voláme vylepšené čištění s předaným multiselectem znaků
-            clean_name = clean_product_name(original_name, custom_stopwords, selected_chars)
+            # Použijeme kompletní seznam znaků (multiselect + text input)
+            clean_name = clean_product_name(original_name, custom_stopwords, all_selected_chars)
             ai_data = enrich_product_with_ai(clean_name, original_name, max_char_length, ai_instruction)
             
             final_title = ai_data.get("nazev_opraveny", clean_name)
             kw_data = ai_data.get("klicova_slova", [])
             kw_str = ", ".join(kw_data) if isinstance(kw_data, list) else str(kw_data)
             
-            # Vyhodnocení stavu auditu
+            # Kontrola stavu auditu
             found_chars = re.findall(uncleaned_pattern, str(clean_name))
             if found_chars:
                 unique_chars = "".join(sorted(list(set(found_chars))))
