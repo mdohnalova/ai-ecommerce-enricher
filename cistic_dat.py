@@ -29,8 +29,17 @@ MODEL_NAME = "claude-3-5-sonnet-20240620"
 st.sidebar.header("⚙️ Konfigurace filtrů na míru")
 
 st.sidebar.subheader("1. Výběr znaků k odstranění")
-clean_special = st.sidebar.checkbox("Speciální znaky (!, ?, *, #, @)", value=True)
-clean_percent = st.sidebar.checkbox("Procenta a slevové štítky (30%, 15%)", value=True)
+
+# Dynamický výběr speciálních znaků kus po kusu + možnost doplnit vlastní
+available_chars = ["!", "?", "*", "#", "@", "~", "%", "&", "$", "_", "=", "+", "^"]
+selected_chars = st.sidebar.multiselect(
+    "Vyberte nebo dopište speciální znaky k odstranění:",
+    options=available_chars,
+    default=["!", "?", "*", "#", "@"]
+)
+
+# Možnost zapnout/vypnout chytré mazání marketingových procent a čísel
+clean_marketing_percentages = st.sidebar.checkbox("Chytře mazat slevová procenta (např. Sleva 30%)", value=True)
 clean_numbers = st.sidebar.checkbox("Všechna samostatná čísla", value=False)
 
 st.sidebar.subheader("2. Marketingový balast")
@@ -63,21 +72,34 @@ else:
 max_char_length = st.sidebar.slider("Maximální délka popisku (znaků):", min_value=50, max_value=1000, value=250)
 
 # ──────────────────────────────────────────────────────────────
-# LOGIKA ČIŠTĚNÍ (REGEX)
+# LOGIKA ČIŠTĚNÍ (REGEX SE ZVÝŠENOU INTELIGENCÍ PRO % SLOŽENÍ)
 # ──────────────────────────────────────────────────────────────
-def clean_product_name(name, user_stopwords):
+def clean_product_name(name, user_stopwords, selected_characters):
     if not name or pd.isna(name):
         return ""
     result = str(name).strip()
     
+    # 1. CHYTRÉ MAZÁNÍ PROCENT: Pokud je aktivní, smaže procenta JEN tehdy, když jsou blízko stop-slov (Sleva 30%)
+    if clean_marketing_percentages:
+        for word in user_stopwords:
+            # Hledá vzor: stop-slovo následované číslem s procentem (např. sleva 20%, akce 30%) nebo naopak
+            pattern1 = r"\b" + re.escape(word) + r"\b\s*\d+\s*%"
+            pattern2 = r"\d+\s*%\s*\b" + re.escape(word) + r"\b"
+            result = re.sub(pattern1, "", result, flags=re.IGNORECASE)
+            result = re.sub(pattern2, "", result, flags=re.IGNORECASE)
+            
+    # 2. Odstranění samotných stop-slov bez procent
     for word in user_stopwords:
         word_pattern = r"\b" + re.escape(word) + r"\b"
         result = re.sub(word_pattern, "", result, flags=re.IGNORECASE)
         
-    if clean_percent:
-        result = re.sub(r"\d+\s*%", "", result)
-    if clean_special:
-        result = re.sub(r"[!?*#@%^&]", "", result)
+    # 3. Odstranění uživatelem zvolených speciálních znaků (kus po kusu z multiselectu)
+    if selected_characters:
+        # Vytvoření bezpečného regexu pro vybrané znaky
+        escaped_chars = "".join([re.escape(c) for c in selected_characters])
+        result = re.sub(r"[" + escaped_chars + r"]", "", result)
+        
+    # 4. Odstranění samostatných čísel (pokud je zaškrtnuto)
     if clean_numbers:
         result = re.sub(r"\b\d+\b", "", result)
         
@@ -133,7 +155,6 @@ with tab1:
             series_products = df_input[column_with_names].dropna().astype(str).str.strip()
             series_products = series_products[series_products != ""]
             
-            # Tady vidíme reálný počet (např. 800)
             full_products_count = len(series_products)
             final_products_list = series_products.tolist()
             
@@ -150,7 +171,7 @@ with tab1:
 
 with tab2:
     if uploaded_file is None:
-        sample_data = "!!! BOTY ADIDAS TERREX - DOPRAVA ZDARMA !!!\nSilonové punčochy dnes za 30% dolů\n~ %&- Hrábě zahradní ~\nSkladem Hodinky Apple 15%"
+        sample_data = "!!! BOTY ADIDAS TERREX - DOPRAVA ZDARMA !!!\nSilonové punčochy dnes za 30% dolů\n~ %&- Hrábě zahradní ~\nKyselina hyaluronová 5%\nSkladem Hodinky Apple 15%"
         text_input = st.text_area("Vložte názvy (každý na nový řádek):", value=sample_data, height=120)
         final_products_list = [line.strip() for line in text_input.split("\n") if line.strip()]
         full_products_count = len(final_products_list)
@@ -163,13 +184,12 @@ if "was_truncated" not in st.session_state:
     st.session_state.was_truncated = False
 
 # ──────────────────────────────────────────────────────────────
-# SPUŠTĚNÍ TRANSFORMACE (OMEZENO NA MAX 20 ZNAKŮ)
+# SPUŠTĚNÍ TRANSFORMACE
 # ──────────────────────────────────────────────────────────────
 if st.button("🚀 Spustit kompletní transformaci dat", type="primary"):
     if not final_products_list:
         st.error("Žádná data k analýze.")
     else:
-        # TADY JE TA MAGIE: Pokud je položek víc než 20, ořízneme seznam pro AI, ale zapamatujeme si to
         if len(final_products_list) > 20:
             processing_list = final_products_list[:20]
             st.session_state.was_truncated = True
@@ -182,18 +202,21 @@ if st.button("🚀 Spustit kompletní transformaci dat", type="primary"):
         status_text = st.empty()
         start_bulk_time = time.time()
         
+        # Podezřelé znaky, které uživatel nenechal odstranit (pro audit krok)
         uncleaned_pattern = r"[~_=+\[\]{}|\\<>`«»]"
         
         for idx, original_name in enumerate(processing_list):
-            status_text.text(f"Zpracovávám {idx + 1} z {len(processing_list)}...")
-            clean_name = clean_product_name(original_name, custom_stopwords)
+            status_text.text(f"Zprocessed {idx + 1} z {len(processing_list)}...")
+            
+            # Voláme vylepšené čištění s předaným multiselectem znaků
+            clean_name = clean_product_name(original_name, custom_stopwords, selected_chars)
             ai_data = enrich_product_with_ai(clean_name, original_name, max_char_length, ai_instruction)
             
             final_title = ai_data.get("nazev_opraveny", clean_name)
             kw_data = ai_data.get("klicova_slova", [])
             kw_str = ", ".join(kw_data) if isinstance(kw_data, list) else str(kw_data)
             
-            # Stav auditu pro detekci zapomenutých vlnovek atd.
+            # Vyhodnocení stavu auditu
             found_chars = re.findall(uncleaned_pattern, str(clean_name))
             if found_chars:
                 unique_chars = "".join(sorted(list(set(found_chars))))
@@ -220,7 +243,7 @@ if st.button("🚀 Spustit kompletní transformaci dat", type="primary"):
         st.session_state.processed_df = pd.DataFrame(results)
 
 # ──────────────────────────────────────────────────────────────
-# ZOBRAZENÍ VÝSLEDKŮ S REAKTIVNÍM UPOZORNĚNÍM
+# ZOBRAZENÍ VÝSLEDKŮ
 # ──────────────────────────────────────────────────────────────
 if st.session_state.processed_df is not None:
     df_results = st.session_state.processed_df
@@ -228,9 +251,8 @@ if st.session_state.processed_df is not None:
     st.write("---")
     st.subheader("✨ Výsledky transformace")
     
-    # --- CHYTRÁ REAKCE PO IMPORTU (Upozornění na limit demo verze) ---
     if st.session_state.was_truncated:
-        st.warning(f"⚠️ **Oznámení Demo verze:** Váš soubor obsahuje celkem {full_products_count} produktů. V rámci bezplatného režimu bylo zpracováno prvních **20 ukázkových položek**. Pro odemčení hromadného zpracování zbývajících {full_products_count - 20} produktů mě kontaktujte pro plnou verzi.")
+        st.warning(f"⚠️ **Oznámení Demo verze:** Váš soubor obsahuje celkem {full_products_count} produktů. V rámci bezplatného režimu bylo zpracováno prvních **20 ukázkových položek**.")
     else:
         st.success("✅ Všechny produkty ze souboru byly úspěšně zpracovány.")
         
@@ -257,9 +279,7 @@ if st.session_state.processed_df is not None:
     
     st.write("---")
     st.subheader("📊 2. KROK KONTROLY: Audit a rychlá editace dat")
-    st.info("💡 **Tip pro audit:** Kliknutím na záhlaví sloupce **🔍 Stav auditu** seřadíte položky tak, aby se řádky označené s **⚠️** (obsahující zapomenuté znaky jako `~`) posunuly nahoru a mohli jste je bleskově ručně opravit.")
+    st.info("💡 **Tip pro audit:** Kliknutím na záhlaví sloupce **🔍 Stav auditu** seřadíte položky tak, aby se řádky označené s **⚠️** posunuly nahoru a mohli jste je bleskově ručně opravit.")
     
-    # Zobrazení stabilního a upravitelného data_editoru
     edited_df = st.data_editor(df_results, use_container_width=True)
-    
     st.session_state.processed_df = pd.DataFrame(edited_df)
