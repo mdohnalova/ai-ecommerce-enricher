@@ -23,7 +23,7 @@ except Exception as e:
     st.error(f"❌ Chyba při načítání API klíče ze Streamlit Secrets: {e}")
     client = None
 
-MODEL_NAME = "claude-3-haiku-20240307"
+MODEL_NAME = "claude-2.1"
 
 # ──────────────────────────────────────────────────────────────
 # BOČNÍ PANEL: ROZŠÍŘENÉ FILTRY A DYNAMICKÝ PROMPT
