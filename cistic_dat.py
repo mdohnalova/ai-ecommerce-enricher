@@ -52,7 +52,7 @@ if prompt_mode == "Rychlé předvolby tónu":
         "Tón e-commerce popisku:",
         ["Profesionální a důvěryhodný", "Přátelský a lidský", "Úderný a prodejní (Hard-sell)", "Eko / Udržitelný styl"]
     )
-    ai_instruction = f"Tón popisku moet být: {ai_tone}."
+    ai_instruction = f"Tón popisku musí být: {ai_tone}."
 else:
     ai_tone = "Vlastní prompt"
     ai_instruction = st.sidebar.text_area(
@@ -110,41 +110,13 @@ def get_intelligent_mock(clean_name, max_chars):
     return {"nazev_opraveny": title, "popis": popis[:max_chars], "klicova_slova": [clean_name, "e-shop"]}
 
 # ──────────────────────────────────────────────────────────────
-# FUNKCE PRO DRUHOU KONTROLU (BAREVNÉ STYLOVÁNÍ)
-# ──────────────────────────────────────────────────────────────
-def style_verification_audit(df):
-    """
-    Vytvoří vizuální mapu stylů pro tabulku, která upozorní na zapomenuté znaky a nesrovnalosti.
-    """
-    style_df = pd.DataFrame('', index=df.index, columns=df.columns)
-    
-    # Detekce neobvyklých speciálních znaků, které nebyly vyčištěny (např. ~, _, =, +, [], {})
-    uncleaned_pattern = r"[~_=+\[\]{}|\\<>`«»]"
-    
-    for row_idx in df.index:
-        # 1. Kontrola "Regex čištění" sloupce
-        val_clean = str(df.at[row_idx, "Regex čištění"])
-        if re.search(uncleaned_pattern, val_clean):
-            style_df.at[row_idx, "Regex čištění"] = 'background-color: #ffe6cc; color: #cc6600; font-weight: bold; border: 1px solid #ff9933;' # Oranžové varování
-            
-        # 2. Kontrola "Finální název (AI)" sloupce
-        val_ai = str(df.at[row_idx, "Finální název (AI)"])
-        if re.search(uncleaned_pattern, val_ai):
-            style_df.at[row_idx, "Finální název (AI)"] = 'background-color: #ffe6cc; color: #cc6600; font-weight: bold;'
-            
-        # 3. Zvýraznění úspěšně a dramaticky upravených popisků (vizuální kontrola)
-        if len(str(df.at[row_idx, "AI Popisek (Shoptet Ready)"])) > 10:
-            style_df.at[row_idx, "AI Popisek (Shoptet Ready)"] = 'background-color: #f6fff6; color: #1e7e34;' # Světle zelená značící Shoptet-Ready text
-            
-    return style_df
-
-# ──────────────────────────────────────────────────────────────
 # HLAVNÍ ROZHRANÍ
 # ──────────────────────────────────────────────────────────────
 st.title("🛍️ AI E-commerce Enricher & Data Cleaner PRO")
-st.caption("Verze: **FREE DEMO** (Omezeno na max. 20 produktů na jeden import)")
+st.caption("Verze: **ENTERPRISE DEMO**")
 
 tab1, tab2 = st.tabs(["📁 Nahrát soubor (CSV / Excel)", "✍️ Ruční zadání textu"])
+full_products_count = 0
 final_products_list = []
 
 with tab1:
@@ -160,21 +132,18 @@ with tab1:
             
             series_products = df_input[column_with_names].dropna().astype(str).str.strip()
             series_products = series_products[series_products != ""]
-            total_rows = len(series_products)
+            
+            # Tady vidíme reálný počet (např. 800)
+            full_products_count = len(series_products)
+            final_products_list = series_products.tolist()
             
             st.write("---")
             st.subheader("📊 Statistiky nahraného souboru")
             col_stat1, col_stat2 = st.columns(2)
             with col_stat1:
-                st.metric(label="Počet nalezených produktů v souboru", value=f"{total_rows} ks")
+                st.metric(label="Celkový počet nalezených produktů", value=f"{full_products_count} ks")
             with col_stat2:
                 st.info(f"Analyzovaný sloupec: **{column_with_names}**")
-            
-            if total_rows > 20:
-                st.warning("⚠️ **Omezení Demo verze:** Váš soubor obsahuje více než 20 produktů. V rámci bezplatné verze bude zpracováno prvních 20 položek.")
-                final_products_list = series_products.tolist()[:20]
-            else:
-                final_products_list = series_products.tolist()
                 
         except Exception as e:
             st.error(f"Chyba při čtení souboru: {e}")
@@ -183,41 +152,66 @@ with tab2:
     if uploaded_file is None:
         sample_data = "!!! BOTY ADIDAS TERREX - DOPRAVA ZDARMA !!!\nSilonové punčochy dnes za 30% dolů\n~ %&- Hrábě zahradní ~\nSkladem Hodinky Apple 15%"
         text_input = st.text_area("Vložte názvy (každý na nový řádek):", value=sample_data, height=120)
-        final_products_list = [line.strip() for line in text_input.split("\n") if line.strip()][:20]
+        final_products_list = [line.strip() for line in text_input.split("\n") if line.strip()]
+        full_products_count = len(final_products_list)
 
 if "processed_df" not in st.session_state:
     st.session_state.processed_df = None
 if "total_time" not in st.session_state:
     st.session_state.total_time = 0
+if "was_truncated" not in st.session_state:
+    st.session_state.was_truncated = False
 
 # ──────────────────────────────────────────────────────────────
-# SPUŠTĚNÍ TRANSFORMACE
+# SPUŠTĚNÍ TRANSFORMACE (OMEZENO NA MAX 20 ZNAKŮ)
 # ──────────────────────────────────────────────────────────────
 if st.button("🚀 Spustit kompletní transformaci dat", type="primary"):
     if not final_products_list:
         st.error("Žádná data k analýze.")
     else:
+        # TADY JE TA MAGIE: Pokud je položek víc než 20, ořízneme seznam pro AI, ale zapamatujeme si to
+        if len(final_products_list) > 20:
+            processing_list = final_products_list[:20]
+            st.session_state.was_truncated = True
+        else:
+            processing_list = final_products_list
+            st.session_state.was_truncated = False
+            
         results = []
         progress_bar = st.progress(0)
         status_text = st.empty()
         start_bulk_time = time.time()
         
-        for idx, original_name in enumerate(final_products_list):
-            status_text.text(f"Zpracovávám {idx + 1} z {len(final_products_list)}...")
+        uncleaned_pattern = r"[~_=+\[\]{}|\\<>`«»]"
+        
+        for idx, original_name in enumerate(processing_list):
+            status_text.text(f"Zpracovávám {idx + 1} z {len(processing_list)}...")
             clean_name = clean_product_name(original_name, custom_stopwords)
             ai_data = enrich_product_with_ai(clean_name, original_name, max_char_length, ai_instruction)
             
+            final_title = ai_data.get("nazev_opraveny", clean_name)
             kw_data = ai_data.get("klicova_slova", [])
             kw_str = ", ".join(kw_data) if isinstance(kw_data, list) else str(kw_data)
             
+            # Stav auditu pro detekci zapomenutých vlnovek atd.
+            found_chars = re.findall(uncleaned_pattern, str(clean_name))
+            if found_chars:
+                unique_chars = "".join(sorted(list(set(found_chars))))
+                audit_status = f"⚠️ Opravit znaky ({unique_chars})"
+            elif not clean_name or clean_name == "Vymazáno":
+                audit_status = "❌ Prázdný název"
+            else:
+                audit_status = "✅ V pořádku"
+            
             results.append({
+                "🔍 Stav auditu": audit_status,
                 "Původní text": original_name,
                 "Regex čištění": clean_name if clean_name else "Vymazáno",
-                "Finální název (AI)": ai_data.get("nazev_opraveny", clean_name),
+                "Finální název (AI)": final_title,
                 "AI Popisek (Shoptet Ready)": ai_data.get("popis", ""),
                 "SEO Klíčová slova": kw_str
             })
-            progress_bar.progress((idx + 1) / len(final_products_list))
+            progress_bar.progress((idx + 1) / len(processing_list))
             
         status_text.empty()
         progress_bar.empty()
@@ -226,7 +220,7 @@ if st.button("🚀 Spustit kompletní transformaci dat", type="primary"):
         st.session_state.processed_df = pd.DataFrame(results)
 
 # ──────────────────────────────────────────────────────────────
-# ZOBRAZENÍ VÝSLEDKŮ S DRUHOU KONTROLOU
+# ZOBRAZENÍ VÝSLEDKŮ S REAKTIVNÍM UPOZORNĚNÍM
 # ──────────────────────────────────────────────────────────────
 if st.session_state.processed_df is not None:
     df_results = st.session_state.processed_df
@@ -234,9 +228,15 @@ if st.session_state.processed_df is not None:
     st.write("---")
     st.subheader("✨ Výsledky transformace")
     
+    # --- CHYTRÁ REAKCE PO IMPORTU (Upozornění na limit demo verze) ---
+    if st.session_state.was_truncated:
+        st.warning(f"⚠️ **Oznámení Demo verze:** Váš soubor obsahuje celkem {full_products_count} produktů. V rámci bezplatného režimu bylo zpracováno prvních **20 ukázkových položek**. Pro odemčení hromadného zpracování zbývajících {full_products_count - 20} produktů mě kontaktujte pro plnou verzi.")
+    else:
+        st.success("✅ Všechny produkty ze souboru byly úspěšně zpracovány.")
+        
     col_kpi1, col_kpi2, col_kpi3 = st.columns(3)
     with col_kpi1:
-        st.metric(label="Zpracováno produktů", value=f"{len(df_results)} ks")
+        st.metric(label="Zobrazeno v tabulce", value=f"{len(df_results)} ks")
     with col_kpi2:
         st.metric(label="Čas zpracování AI", value=f"{st.session_state.total_time} s")
     with col_kpi3:
@@ -256,14 +256,10 @@ if st.session_state.processed_df is not None:
         st.button("🔗 Kopírovat odkaz pro sdílení výsledků", on_click=lambda: st.toast("Odkaz byl zkopírován do schránky!"), use_container_width=True)
     
     st.write("---")
-    st.subheader("📊 2. KROK KONTROLY: Audit a editace dat")
-    st.info("💡 **Legenda auditu:** Bunky s nezvolenými / zapomenutými znaky (např. `~`) jsou podsvíceny **oranžově**, abyste je mohli okamžitě prokliknout a opravit. Zkontrolované AI popisky jsou jemně **zelené**.")
+    st.subheader("📊 2. KROK KONTROLY: Audit a rychlá editace dat")
+    st.info("💡 **Tip pro audit:** Kliknutím na záhlaví sloupce **🔍 Stav auditu** seřadíte položky tak, aby se řádky označené s **⚠️** (obsahující zapomenuté znaky jako `~`) posunuly nahoru a mohli jste je bleskově ručně opravit.")
     
-    # Aplikování druhé vizuální kontroly na tabulku
-    styled_df = df_results.style.apply(style_verification_audit, axis=None)
+    # Zobrazení stabilního a upravitelného data_editoru
+    edited_df = st.data_editor(df_results, use_container_width=True)
     
-    # Zobrazení interaktivního editoru s nanesenými styly auditu
-    edited_df = st.data_editor(styled_df, use_container_width=True)
-    
-    # Zpětné uložení ručně opravených hodnot do paměti aplikace
     st.session_state.processed_df = pd.DataFrame(edited_df)
