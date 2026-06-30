@@ -12,15 +12,15 @@ import pandas as pd
 
 st.set_page_config(page_title="AI E-commerce Enricher PRO", page_icon="🛍️", layout="wide")
 
-# Inicializace Claude API klienta
+# ──────────────────────────────────────────────────────────────
+# INICIALIZACE SKUTEČNÉHO ANTHROPIC CLIENTA (BEZ TESTOVACÍCH PODMÍNEK)
+# ──────────────────────────────────────────────────────────────
 try:
-    # Načtení klíče ze struktury [anthropic] api_key
+    # Načtení klíče přesně podle formátu Streamlit Secrets [anthropic] api_key
     api_key = st.secrets["anthropic"]["api_key"]
-    if api_key and api_key.startswith("sk-ant-"):
-        client = anthropic.Anthropic(api_key=api_key)
-    else:
-        client = None
-except Exception:
+    client = anthropic.Anthropic(api_key=api_key)
+except Exception as e:
+    st.error(f"❌ Chyba při načítání API klíče ze Streamlit Secrets: {e}")
     client = None
 
 MODEL_NAME = "claude-3-5-sonnet-20240620"
@@ -67,7 +67,7 @@ prompt_mode = st.sidebar.radio(
 if prompt_mode == "Rychlé předvolby tónu":
     ai_tone = st.sidebar.selectbox(
         "Tón e-commerce popisku:",
-        ["Profesionální a důvěryhodný", "Přátelský a lidský", "Úderný a prodejní (Hard-sell)", "Eko / Udržitelný style"]
+        ["Profesionální a důvěryhodný", "Přátelský a lidský", "Úderný a prodejní (Hard-sell)", "Eko / Udržitelný styl"]
     )
     ai_instruction = f"Tón popisku musí být: {ai_tone}."
 else:
@@ -111,9 +111,10 @@ def clean_product_name(name, user_stopwords, selected_characters):
     result = re.sub(r"\s+", " ", result).strip()
     return result
 
+# OSTRÉ VOLÁNÍ AI BEZ FALOŠNÝCH TEXTŮ
 def enrich_product_with_ai(clean_name, original_name, max_chars, instruction):
     if not client:
-        return get_intelligent_mock(clean_name, max_chars)
+        return {"nazev_opraveny": clean_name, "popis": "Chyba: API klient není inicializován.", "klicova_slova": []}
     
     system_prompt = "Jsi špičkový SEO a copywriter specialista pro e-shopy. Odpovědi vracej striktně v platném JSON formátu."
     user_prompt = (
@@ -123,18 +124,18 @@ def enrich_product_with_ai(clean_name, original_name, max_chars, instruction):
         f"Maximální délka popisku: {max_chars} znaků.\n"
         'Odpověz striktně jako JSON v tomto formátu: {"nazev_opraveny": "...", "popis": "...", "klicova_slova": ["...", "...", "..."]}'
     )
+    
     try:
         response = client.messages.create(
-            model=MODEL_NAME, max_tokens=1024, system=system_prompt, messages=[{"role": "user", "content": user_prompt}]
+            model=MODEL_NAME, 
+            max_tokens=1024, 
+            system=system_prompt, 
+            messages=[{"role": "user", "content": user_prompt}]
         )
         return json.loads(response.content[0].text)
-    except Exception:
-        return get_intelligent_mock(clean_name, max_chars)
-
-def get_intelligent_mock(clean_name, max_chars):
-    title = clean_name.title() if clean_name else "Produkt"
-    popis = f"Skvělé řešení {title} splňuje nejvyšší standardy kvality pro váš e-shop podle zadaného promptu."
-    return {"nazev_opraveny": title, "popis": popis[:max_chars], "klicova_slova": [clean_name, "e-shop"]}
+    except Exception as e:
+        # Pokud AI selže (např. kvůli kreditu), vypíšeme skutečnou chybu do tabulky
+        return {"nazev_opraveny": clean_name, "popis": f"AI Chyba: {str(e)}", "klicova_slova": ["chyba"]}
 
 # ──────────────────────────────────────────────────────────────
 # HLAVNÍ ROZHRANÍ
@@ -205,6 +206,8 @@ run_main = st.button("🚀 Spustit kompletní transformaci dat", type="primary")
 if run_main or run_sidebar:
     if not final_products_list:
         st.error("Žádná data k analýze.")
+    elif not client:
+        st.error("Nemohu spustit transformaci, protože API klíč Anthropic není správně nakonfigurován ve Streamlit Secrets.")
     else:
         if len(final_products_list) > 20:
             st.session_state.was_truncated = True
@@ -280,11 +283,9 @@ if st.session_state.processed_df is not None:
         saved_minutes = len(df_results) * 3
         st.metric(label="Ušetřený čas copywritera", value=f"~ {saved_minutes} min", delta="🔥 Efektivita")
     
-    # ─── NOVINKA: VARIANTY SLOUPCŮ PRO EXPORT ───
     st.write("---")
     st.write("### 📥 Export a nastavení stahovaných dat")
     
-    # Multiselect přímo nad tlačítky pro stažení, kde si uživatel vybere, co chce v souboru nechat
     export_columns = st.multiselect(
         "Vyberte sloupce, které chcete zahrnout do výsledného exportu (CSV / JSON):",
         options=list(df_results.columns),
@@ -294,7 +295,6 @@ if st.session_state.processed_df is not None:
     if not export_columns:
         st.error("⚠️ Musíte vybrat alespoň jeden sloupec pro export.")
     else:
-        # Filtrujeme dataframe na základě vybraných sloupců pro export
         df_to_export = df_results[export_columns]
         
         col_btn1, col_btn2, col_btn3 = st.columns([2, 2, 3])
@@ -311,6 +311,5 @@ if st.session_state.processed_df is not None:
     st.subheader("📊 2. KROK KONTROLY: Audit a rychlá editace dat")
     st.info("💡 **Tip pro audit:** Kliknutím na záhlaví sloupce **🔍 Stav auditu** seřadíte položky tak, aby se řádky označené s **⚠️** posunuly nahoru a mohli jste je bleskově ručně opravit.")
     
-    # Datový editor zobrazuje vždy plnou tabulku pro pohodlnou editaci a kontrolu
     edited_df = st.data_editor(df_results, use_container_width=True)
     st.session_state.processed_df = pd.DataFrame(edited_df)
