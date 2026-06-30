@@ -31,14 +31,14 @@ st.sidebar.header("⚙️ Konfigurace filtrů na míru")
 st.sidebar.subheader("1. Výběr znaků k odstranění")
 
 # Předdefinovaný multiselect
-available_chars = ["!", "?", "*", "#", "@", "~", "%", "&", "$", "_", "=", "+", "^", "<", ">", "[", "]", "{", "}"]
+available_chars = ["!", "?", "*", "#", "@", "~", "%", "&", "$", "_", "=", "+", "^", "<", ">", "[", "]", "{", "}", "\"", "'"]
 selected_chars = st.sidebar.multiselect(
     "Vyberte přednastavené znaky k odstranění:",
     options=available_chars,
     default=["!", "?", "*", "#", "@"]
 )
 
-# --- KLÍČOVÁ OPRAVA: Textové pole pro vlastní dodatečné znaky ---
+# Textové pole pro vlastní dodatečné znaky
 custom_chars_input = st.sidebar.text_input(
     "Dopište další znaky bez oddělování (např. §°×):",
     value=""
@@ -46,7 +46,6 @@ custom_chars_input = st.sidebar.text_input(
 
 # Sloučení vybraných znaků z multiselectu a ručně dopsaných z text inputu
 all_selected_chars = list(selected_chars) + list(custom_chars_input)
-# Odstranění duplicit, aby byl seznam čistý
 all_selected_chars = list(set(all_selected_chars))
 
 # Možnost zapnout/vypnout chytré mazání marketingových procent a čísel
@@ -82,15 +81,18 @@ else:
 
 max_char_length = st.sidebar.slider("Maximální délka popisku (znaků):", min_value=50, max_value=1000, value=250)
 
+st.sidebar.write("---")
+# PŘIDÁNÍ TLAČÍTKA NA SPODEK LEVÉHO PANELU
+run_sidebar = st.sidebar.button("🚀 Spustit kompletní transformaci", key="sidebar_run_btn", use_container_width=True)
+
 # ──────────────────────────────────────────────────────────────
-# LOGIKA ČIŠTĚNÍ (REGEX SE ZVÝŠENOU INTELIGENCÍ PRO % SLOŽENÍ)
+# LOGIKA ČIŠTĚNÍ
 # ──────────────────────────────────────────────────────────────
 def clean_product_name(name, user_stopwords, selected_characters):
     if not name or pd.isna(name):
         return ""
     result = str(name).strip()
     
-    # 1. CHYTRÉ MAZÁNÍ PROCENT
     if clean_marketing_percentages:
         for word in user_stopwords:
             pattern1 = r"\b" + re.escape(word) + r"\b\s*\d+\s*%"
@@ -98,17 +100,14 @@ def clean_product_name(name, user_stopwords, selected_characters):
             result = re.sub(pattern1, "", result, flags=re.IGNORECASE)
             result = re.sub(pattern2, "", result, flags=re.IGNORECASE)
             
-    # 2. Odstranění stop-slov
     for word in user_stopwords:
         word_pattern = r"\b" + re.escape(word) + r"\b"
         result = re.sub(word_pattern, "", result, flags=re.IGNORECASE)
         
-    # 3. Odstranění všech sloučených speciálních znaků
     if selected_characters:
         escaped_chars = "".join([re.escape(c) for c in selected_characters])
         result = re.sub(r"[" + escaped_chars + r"]", "", result)
         
-    # 4. Odstranění samostatných čísel
     if clean_numbers:
         result = re.sub(r"\b\d+\b", "", result)
         
@@ -180,7 +179,7 @@ with tab1:
 
 with tab2:
     if uploaded_file is None:
-        sample_data = "!!! BOTY ADIDAS TERREX - DOPRAVA ZDARMA !!!\nSilonové punčochy dnes za 30% dolů\n~ %&- Hrábě zahradní ~\nKyselina hyaluronová 5%\nSkladem Hodinky Apple 15%"
+        sample_data = "!!! BOTY ADIDAS TERREX - DOPRAVA ZDARMA !!!\nSilonové punčochy dnes za 30% dolů\n~ %&- Hrábě zahradní ~\nKyselina hyaluronová 5%\n^^ Pracovní rukavice ^^\nSkladem Hodinky Apple 15%"
         text_input = st.text_area("Vložte názvy (každý na nový řádek):", value=sample_data, height=120)
         final_products_list = [line.strip() for line in text_input.split("\n") if line.strip()]
         full_products_count = len(final_products_list)
@@ -192,10 +191,13 @@ if "total_time" not in st.session_state:
 if "was_truncated" not in st.session_state:
     st.session_state.was_truncated = False
 
+# Hlavní spouštěcí tlačítko uprostřed
+run_main = st.button("🚀 Spustit kompletní transformaci dat", type="primary")
+
 # ──────────────────────────────────────────────────────────────
-# SPUŠTĚNÍ TRANSFORMACE
+# SPUŠTĚNÍ TRANSFORMACE (REAGUJE NA OBĚ TLAČÍTKA)
 # ──────────────────────────────────────────────────────────────
-if st.button("🚀 Spustit kompletní transformaci dat", type="primary"):
+if run_main or run_sidebar:
     if not final_products_list:
         st.error("Žádná data k analýze.")
     else:
@@ -211,12 +213,9 @@ if st.button("🚀 Spustit kompletní transformaci dat", type="primary"):
         status_text = st.empty()
         start_bulk_time = time.time()
         
-        uncleaned_pattern = r"[~_=+\[\]{}|\\<>`«»]"
-        
         for idx, original_name in enumerate(processing_list):
             status_text.text(f"Zpracovávám {idx + 1} z {len(processing_list)}...")
             
-            # Použijeme kompletní seznam znaků (multiselect + text input)
             clean_name = clean_product_name(original_name, custom_stopwords, all_selected_chars)
             ai_data = enrich_product_with_ai(clean_name, original_name, max_char_length, ai_instruction)
             
@@ -224,10 +223,12 @@ if st.button("🚀 Spustit kompletní transformaci dat", type="primary"):
             kw_data = ai_data.get("klicova_slova", [])
             kw_str = ", ".join(kw_data) if isinstance(kw_data, list) else str(kw_data)
             
-            # Kontrola stavu auditu
-            found_chars = re.findall(uncleaned_pattern, str(clean_name))
-            if found_chars:
-                unique_chars = "".join(sorted(list(set(found_chars))))
+            # --- UNIVERZÁLNÍ AUTOMATICKÝ AUDIT NEZVOLENÝCH ZNAKŮ ---
+            # Najde všechno, co není text, číslo, česká diakritika, procento, mezera, tečka, čárka nebo pomlčka
+            suspicious_chars = re.findall(r"[^\w\s.,%\-\u00C0-\u017F]", str(clean_name))
+            
+            if suspicious_chars:
+                unique_chars = "".join(sorted(list(set(suspicious_chars))))
                 audit_status = f"⚠️ Opravit znaky ({unique_chars})"
             elif not clean_name or clean_name == "Vymazáno":
                 audit_status = "❌ Prázdný název"
