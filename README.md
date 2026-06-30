@@ -78,7 +78,7 @@ nike air max 90
 {
   "original_name": "NIKE AIR MAX 90 ** AKCE!! ** SLEVA 30%",
   "clean_name": "nike air max 90",
-  "ai_description": "Nike Air Max 90 je ikonická teniска, která spojuje legendární streetwear styl s výjimečným pohodlím...",
+  "ai_description": "Nike Air Max 90 je ikonická teniskа, která spojuje legendární streetwear styl s výjimečným pohodlím...",
   "keywords": ["nike air max 90", "tenisky nike", "sneakers klasika"],
   "processing_speed_seconds": 1.97
 }
