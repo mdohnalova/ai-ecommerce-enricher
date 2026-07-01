@@ -12,6 +12,9 @@ import pandas as pd
 
 st.set_page_config(page_title="AI Data Cleaner & Enricher", page_icon="⚙️", layout="wide")
 
+# Globální definice modelu pro Anthropic
+MODEL_NAME = "claude-3-5-sonnet-20241022"
+
 # ──────────────────────────────────────────────────────────────
 # INICIALIZACE ANTHROPIC CLIENTA
 # ──────────────────────────────────────────────────────────────
@@ -21,8 +24,6 @@ try:
 except Exception as e:
     st.error(f"❌ Chyba při načítání API klíče ze Streamlit Secrets: {e}")
     client = None
-
-MODEL_NAME = "claude-sonnet-4-6"
 
 # ──────────────────────────────────────────────────────────────
 # BOČNÍ PANEL: KONFIGURACE FILTRŮ
@@ -55,7 +56,7 @@ prompt_mode = st.sidebar.radio("Jak chcete definovat styl popisků?", ["Rychlé 
 
 if prompt_mode == "Rychlé předvolby tónu":
     ai_tone = st.sidebar.selectbox("Tón e-commerce popisku:", ["Profesionální a důvěryhodný", "Přátelský a lidský", "Úderný a prodejní (Hard-sell)", "Eko / Udržitelný styl"])
-    ai_instruction = f"Tón popisku musí být: {ai_tone}."
+    ai_instruction = f"Tón popisku must be: {ai_tone}."
 else:
     ai_instruction = st.sidebar.text_area("Napište instrukce pro AI (co má s textem udělat):", value="Napiš popisky produktů jako marketingový specialista s důrazem na SEO.")
 
@@ -101,7 +102,7 @@ def enrich_product_with_ai(clean_name, original_name, max_chars, instruction):
     
     text_zadani = (
         "Jsi špičkový e-commerce copywriter a auditor produktových dat.\n"
-        "Tvým hlavním úkolem je zkontrolovat text v poli 'Očištěný název z Regex filtru' and na základě něj a původního názvu navrhnout ideální finální název produktu pro e-shop a napsat popisek.\n"
+        "Tvým hlavním úkolem je zkontrolovat text v poli 'Očištěný název z Regex filtru' a na základě něj a původního názvu navrhnout ideální finální název produktu pro e-shop a napsat popisek.\n"
         "NIKDY si nevymýšlej jiný druh zboží, drž se striktně zadaného produktu!\n\n"
         f"PŮVODNÍ NÁZEV PRO KONTEXT: {original_name}\n"
         f"OČIŠTĚNÝ NÁZEV Z REGEX FILTRU: {clean_name}\n"
@@ -115,13 +116,14 @@ def enrich_product_with_ai(clean_name, original_name, max_chars, instruction):
         "Do pole 'klicova_slova' dej seznam 2-5 klíčových slov.\n"
     )
     
-   try:
+    try:
         response = client.messages.create(
             model=MODEL_NAME, 
             max_tokens=1024, 
             messages=[{"role": "user", "content": text_zadani}]
         )
-        # BEZPEČNÉ VYTAŽENÍ TEXTU: Funguje pro staré i nové verze knihovny anthropic
+        
+        # Bezpečné načtení textu bez ohledu na verzi knihovny anthropic
         if hasattr(response, 'content') and isinstance(response.content, list):
             block = response.content[0]
             raw_text = block.text.strip() if hasattr(block, 'text') else str(block).strip()
@@ -134,6 +136,9 @@ def enrich_product_with_ai(clean_name, original_name, max_chars, instruction):
             if start_idx != -1 and end_idx != 0: 
                 raw_text = raw_text[start_idx:end_idx]
         return json.loads(raw_text)
+    except Exception as e:
+        return {"audit_status": "❌ Chyba", "nazev_opraveny": clean_name, "popis": f"AI Chyba: {str(e)}", "klicova_slova": []}
+
 # ──────────────────────────────────────────────────────────────
 # MAIN INTERFACE
 # ──────────────────────────────────────────────────────────────
@@ -155,7 +160,7 @@ with tab1:
             else:
                 original_df = pd.read_excel(uploaded_file)
             
-            # Detekce sloupce s názvem (český nebo anglický Shoptet formát)
+            # Detekce sloupce s názvem
             default_index = 0
             for target_col in ["název", "nazev", "name"]:
                 if target_col in original_df.columns:
@@ -258,7 +263,7 @@ if run_main or run_sidebar:
         
         st.session_state.total_time = round(time.time() - start_bulk_time, 1)
         
-        # Uložení náhledů pro uživatele v aplikaci (česky)
+        # Uložení náhledů pro uživatele
         working_df["Původní špinavý název"] = working_df[column_with_names]
         working_df[column_with_names] = final_names_shoptet
         
@@ -333,7 +338,6 @@ if st.session_state.processed_df is not None:
         "popis": "description"
     }
     download_df = download_df.rename(columns=shoptet_mapping)
-    # ──────────────────────────────────────────────
         
     csv_buffer = download_df.to_csv(index=False, encoding='utf-8-sig', sep=';')
     st.download_button(
