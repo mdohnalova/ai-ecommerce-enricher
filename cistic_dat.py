@@ -118,7 +118,7 @@ def enrich_product_with_ai(clean_name, original_name, max_chars, instruction):
         return {"audit_status": "❌ Chyba", "nazev_opraveny": clean_name, "popis": "Chyba: API klient není inicializován.", "klicova_slova": []}
     
     text_zadani = (
-        "Jsi špičkový e-commerce copywriter a auditor produktových dat. "
+        "Jsi špičkový e-commerce copywriter and auditor produktových dat. "
         "Tvým úkolem je nejprve zkontrolovat sloupec 'Regex čištění' (Cleaned Name) a posoudit, zda dává smysl jako název produktu, nebo zda v něm nezůstal balast či chyba. "
         "Odpověď musí být výhradně platná JSON struktura.\n\n"
         f"Původní neočištěný název pro kontext: {original_name}\n"
@@ -156,7 +156,7 @@ def enrich_product_with_ai(clean_name, original_name, max_chars, instruction):
 # HLAVNÍ ROZHRANÍ
 # ──────────────────────────────────────────────────────────────
 st.title("🛍️ AI E-commerce Enricher & Data Cleaner PRO")
-st.caption("Verze: **ENTERPRISE DEMO - INTELLIGENT AUTO-MATCH**")
+st.caption("Verze: **ENTERPRISE DEMO - SAFE MEMORY WRITE**")
 
 tab1, tab2 = st.tabs(["📁 Nahrát soubor (CSV / Excel)", "✍️ Ruční zadání textu"])
 full_products_count = 0
@@ -171,23 +171,23 @@ with tab1:
             else:
                 df_input = pd.read_excel(uploaded_file)
             
-            # INTELIGENTNÍ DETEKCE: Najde sloupec s názvem bez ohledu na velikost písmen
+            # Najde sloupec s názvem bez ohledu na velikost písmen
             column_with_names = None
             for col in df_input.columns:
                 if str(col).lower().strip() in ["name", "název", "nazev"]:
                     column_with_names = col
                     break
             if column_with_names is None:
-                column_with_names = df_input.columns[0] # nouzový fallback na první sloupec
+                column_with_names = df_input.columns[0]
                 
-            # INTELIGENTNÍ DETEKCE: Najde sloupec s popisem
+            # Najde sloupec s popisem
             desc_column = None
             for col in df_input.columns:
                 if str(col).lower().strip() in ["description", "popis"]:
                     desc_column = col
                     break
             if desc_column is None:
-                desc_column = "description" # pokud neexistuje vůbec, vytvoříme ho s tímto názvem
+                desc_column = "description"
             
             full_products_count = len(df_input)
             st.write("---")
@@ -235,12 +235,13 @@ if "was_truncated" not in st.session_state:
 run_main = st.button("🚀 Spustit kompletní transformaci dat", type="primary")
 
 # ──────────────────────────────────────────────────────────────
-# SPUŠTĚNÍ TRANSFORMACE
+# SPUŠTĚNÍ TRANSFORMACE (OPRAVA BEZPEČNÉHO ZÁPISU)
 # ──────────────────────────────────────────────────────────────
 if (run_main or run_sidebar) and df_input is not None and column_with_names is not None:
     if not client:
         st.error("Nemohu spustit transformaci, protože API klíč Anthropic není správně nakonfigurován.")
     else:
+        # Vytvoření samostatného DataFrame objektu v paměti
         if len(df_input) > 20:
             st.session_state.was_truncated = True
             if demo_selection_strategy == "Náhodný výběr 20 produktů":
@@ -282,14 +283,15 @@ if (run_main or run_sidebar) and df_input is not None and column_with_names is n
         progress_bar.empty()
         st.session_state.total_time = round(time.time() - start_bulk_time, 1)
         
-        # BEZPEČNÉ PŘEPSÁNÍ DAT V KOMPLETNÍM ŘÁDKU
-        working_df[column_with_names] = final_names
-        
+        # Pojistka: Pokud sloupec pro popis v originále vůbec nebyl, vytvoříme ho
         if desc_column not in working_df.columns:
             working_df[desc_column] = ""
-        working_df[desc_column] = final_descriptions
+            
+        # BEZPEČNÝ ZÁPIS POMOCÍ .loc ABY SE ZABRÁNILO SETTINGWITHCOPYWARNINGCHYBÁM
+        working_df.loc[:, column_with_names] = final_names
+        working_df.loc[:, desc_column] = final_descriptions
         
-        # Přidání stavu auditu jako prvního sloupce pro tabulkový přehled v aplikaci
+        # Přidání stavu auditu jako prvního sloupce pro tabulkový přehled
         if "🔍 Stav auditu" in working_df.columns:
             working_df = working_df.drop(columns=["🔍 Stav auditu"])
         working_df.insert(0, "🔍 Stav auditu", audit_statuses)
