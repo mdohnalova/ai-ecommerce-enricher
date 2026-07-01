@@ -1,3 +1,4 @@
+
 import streamlit as st
 import anthropic
 import json
@@ -69,7 +70,7 @@ if prompt_mode == "Rychlé předvolby tónu":
         "Tón e-commerce popisku:",
         ["Profesionální a důvěryhodný", "Přátelský a lidský", "Úderný a prodejní (Hard-sell)", "Eko / Udržitelný styl"]
     )
-    ai_instruction = f"Tón popisku mustí být: {ai_tone}."
+    ai_instruction = f"Tón popisku musí být: {ai_tone}."
 else:
     ai_tone = "Vlastní prompt"
     ai_instruction = st.sidebar.text_area(
@@ -262,10 +263,13 @@ if (run_main or run_sidebar) and df_input is not None and column_with_names is n
         status_text = st.empty()
         start_bulk_time = time.time()
         
-        # Bezpečné procházení řádků pomocí rozhraní .iloc bez ohledu na rozházené indexy
+        # Čisté 2D indexování pomocí iloc[řádek, sloupec_index]
         for idx in range(limit):
             status_text.text(f"Zpracovávám {idx + 1} z {limit}...")
-            original_name = str(working_df.iloc[idx][working_df.columns.get_loc(column_with_names)])
+            
+            # OPRAVENO: Bezpečné získání hodnoty z 2D matice
+            col_idx = working_df.columns.get_loc(column_with_names)
+            original_name = str(working_df.iloc[idx, col_idx])
             
             # 1. Krok: Vyčištění přes Regex
             clean_name = clean_product_name(original_name, custom_stopwords, all_selected_chars)
