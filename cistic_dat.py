@@ -101,7 +101,7 @@ def enrich_product_with_ai(clean_name, original_name, max_chars, instruction):
     
     text_zadani = (
         "Jsi špičkový e-commerce copywriter a auditor produktových dat.\n"
-        "Tvým hlavním úkolem je zkontrolovat text v poli 'Očištěný název z Regex filtru' a na základě něj a původního názvu navrhnout ideální finální název produktu pro e-shop a napsat popisek.\n"
+        "Tvým hlavním úkolem je zkontrolovat text v poli 'Očištěný název z Regex filtru' and na základě něj a původního názvu navrhnout ideální finální název produktu pro e-shop a napsat popisek.\n"
         "NIKDY si nevymýšlej jiný druh zboží, drž se striktně zadaného produktu!\n\n"
         f"PŮVODNÍ NÁZEV PRO KONTEXT: {original_name}\n"
         f"OČIŠTĚNÝ NÁZEV Z REGEX FILTRU: {clean_name}\n"
@@ -147,16 +147,17 @@ with tab1:
     uploaded_file = st.file_uploader("Vyberte váš exportní soubor z e-shopu", type=["csv", "xlsx"])
     if uploaded_file is not None:
         try:
-            # Podpora středníku i čárky u CSV z Shoptetu
             if uploaded_file.name.endswith('.csv'):
                 original_df = pd.read_csv(uploaded_file, sep=None, engine='python', encoding='utf-8-sig')
             else:
                 original_df = pd.read_excel(uploaded_file)
             
-            # Automatický předvýběr sloupce "name", pokud v Shoptet exportu existuje
+            # Detekce sloupce s názvem (český nebo anglický Shoptet formát)
             default_index = 0
-            if "name" in original_df.columns:
-                default_index = list(original_df.columns).index("name")
+            for target_col in ["název", "nazev", "name"]:
+                if target_col in original_df.columns:
+                    default_index = list(original_df.columns).index(target_col)
+                    break
                 
             column_with_names = st.selectbox(
                 "Vyberte sloupec, který obsahuje názvy produktů k vyčištění:", 
@@ -174,7 +175,7 @@ with tab1:
             with col_stat1:
                 st.metric(label="Celkový počet položek v souboru", value=f"{full_products_count} ks")
             with col_stat2:
-                st.info(f"Všechny ostatní parametry (Kódy, Ceny, Sklady) budou plně zachovány.")
+                st.info(f"Všechny ostatní parametry (Kódy, Ceny, Sklady) budou plně zachovány a přeloženy do Shoptet formátu.")
                 
             if full_products_count > 20:
                 st.warning("💡 **Demo režim:** Soubor obsahuje více produktů. V rámci ukázky zpracujeme max 20 řádků.")
@@ -191,8 +192,8 @@ with tab2:
         text_input = st.text_area("Vložte zkušební názvy (každý na nový řádek):", value=sample_data, height=120)
         final_products_list = [line.strip() for line in text_input.split("\n") if line.strip()]
         full_products_count = len(final_products_list)
-        original_df = pd.DataFrame({"name": final_products_list})
-        column_with_names = "name"
+        original_df = pd.DataFrame({"název": final_products_list})
+        column_with_names = "název"
 
 if "processed_df" not in st.session_state: st.session_state.processed_df = None
 if "total_time" not in st.session_state: st.session_state.total_time = 0
@@ -254,20 +255,15 @@ if run_main or run_sidebar:
         
         st.session_state.total_time = round(time.time() - start_bulk_time, 1)
         
-        # OŠETŘENÍ: Pokud tabulka už sloupec 'name' nebo 'description' měla, přejmenujeme staré sloupce pro srovnání
-        if "name" in working_df.columns and column_with_names == "name":
-            working_df = working_df.rename(columns={"name": "Původní název (Shoptet)"})
-        if "description" in working_df.columns:
-            working_df = working_df.rename(columns={"description": "Původní popisek (Shoptet)"})
-            
-        # Vložení nových auditních sloupců na začátek tabulky pro přehlednost
-        working_df.insert(0, "🔍 Stav auditu", audit_statuses)
-        working_df.insert(1, "Regex čištění", regex_clean_names)
+        # Uložení náhledů pro uživatele v aplikaci (česky)
+        working_df["Původní špinavý název"] = working_df[column_with_names]
+        working_df[column_with_names] = final_names_shoptet
         
-        # Zápis do ostrých Shoptet sloupců na konec tabulky
-        working_df["name"] = final_names_shoptet
-        working_df["description"] = descriptions_shoptet
-        working_df["shortDescription"] = seo_keywords
+        desc_col = "popis" if "popis" in working_df.columns else ("description" if "description" in working_df.columns else "popis")
+        working_df[desc_col] = descriptions_shoptet
+        
+        working_df.insert(0, "🔍 Stav auditu", audit_statuses)
+        working_df["_seo_cache"] = seo_keywords
         
         st.session_state.processed_df = working_df
 
@@ -278,7 +274,7 @@ if st.session_state.processed_df is not None:
     df_results = st.session_state.processed_df
     
     st.write("---")
-    st.subheader("✨ Výsledky transformace (Shoptet Ready)")
+    st.subheader("✨ Výsledky transformace")
     
     if st.session_state.was_truncated:
         st.warning(f"⚠️ **Ukázka zpracování dat dokončena:** Ze souboru o celkovém počtu {full_products_count} položek bylo vybráno 20 vzorků.")
@@ -294,18 +290,51 @@ if st.session_state.processed_df is not None:
     
     st.write("---")
     st.subheader("📊 KONTROLA: Audit a rychlá editace dat")
-    st.info("💡 **Tip:** Sloupce **`name`** a **`description`** jsou ty, které se nahrají do Shoptetu jako nové čisté hodnoty. Pokud v nich cokoli přepíšeš, okamžitě se to uloží do stahovaného souboru.")
+    st.info("💡 **Tip:** V tabulce vidíte česká záhlaví pro pohodlnou editaci. Při stažení se automaticky přeloží do formátu pro Shoptet.")
     
-    edited_df = st.data_editor(df_results, use_container_width=True)
-    st.session_state.processed_df = pd.DataFrame(edited_df)
+    view_df = df_results.copy()
+    if "_seo_cache" in view_df.columns:
+        view_df = view_df.drop(columns=["_seo_cache"])
+        
+    edited_df = st.data_editor(view_df, use_container_width=True)
     
     st.write("---")
-    st.write("### 📥 Stažení kompletního Shoptet importního balíčku")
+    st.write("### 📥 Nastavení exportu a stažení")
     
-    # Export s kódováním utf-8-sig a středníkem pro bezproblémové otevření v Excelu i Shoptetu
-    csv_buffer = st.session_state.processed_df.to_csv(index=False, encoding='utf-8-sig', sep=';')
+    add_seo_column = st.checkbox("Přidat do stahovaného souboru sloupec s SEO klíčovými slovy", value=False)
+    
+    download_df = pd.DataFrame(edited_df)
+    
+    if add_seo_column and "_seo_cache" in df_results.columns:
+        download_df["shortDescription"] = df_results["_seo_cache"].values
+        
+    if "🔍 Stav auditu" in download_df.columns:
+        download_df = download_df.drop(columns=["🔍 Stav auditu"])
+    if "Původní špinavý název" in download_df.columns:
+        download_df = download_df.drop(columns=["Původní špinavý název"])
+        
+    # --- AUTOMATICKÝ PŘEKLAD DO SHOPTET FORMÁTU ---
+    shoptet_mapping = {
+        "kód": "code",
+        "název": "name",
+        "nazev": "name",
+        "cena": "price",
+        "nákupní cena": "purchasePrice",
+        "nakupni cena": "purchasePrice",
+        "dph": "vat",
+        "sklad": "stock",
+        "jednotka": "unit",
+        "výrobce": "manufacturer",
+        "vyrobce": "manufacturer",
+        "kategorie": "categoryText",
+        "popis": "description"
+    }
+    download_df = download_df.rename(columns=shoptet_mapping)
+    # ──────────────────────────────────────────────
+        
+    csv_buffer = download_df.to_csv(index=False, encoding='utf-8-sig', sep=';')
     st.download_button(
-        label="📥 STÁHNOUT FINÁLNÍ CSV PRO SHOPTET IMPORT", 
+        label="📥 STÁHNOUT FINÁLNÍ ČISTÉ CSV PRO SHOPTET IMPORT", 
         data=csv_buffer, 
         file_name="shoptet_import_ready.csv", 
         mime="text/csv", 
