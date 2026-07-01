@@ -115,22 +115,25 @@ def enrich_product_with_ai(clean_name, original_name, max_chars, instruction):
         "Do pole 'klicova_slova' dej seznam 2-5 klíčových slov.\n"
     )
     
-    try:
+   try:
         response = client.messages.create(
             model=MODEL_NAME, 
             max_tokens=1024, 
             messages=[{"role": "user", "content": text_zadani}]
         )
-        raw_text = response.content[0].text.strip()
+        # BEZPEČNÉ VYTAŽENÍ TEXTU: Funguje pro staré i nové verze knihovny anthropic
+        if hasattr(response, 'content') and isinstance(response.content, list):
+            block = response.content[0]
+            raw_text = block.text.strip() if hasattr(block, 'text') else str(block).strip()
+        else:
+            raw_text = response.content.strip()
+
         if not raw_text.startswith("{"):
             start_idx = raw_text.find("{")
             end_idx = raw_text.rfind("}") + 1
             if start_idx != -1 and end_idx != 0: 
                 raw_text = raw_text[start_idx:end_idx]
         return json.loads(raw_text)
-    except Exception as e:
-        return {"audit_status": "❌ Chyba", "nazev_opraveny": clean_name, "popis": f"AI Chyba: {str(e)}", "klicova_slova": []}
-
 # ──────────────────────────────────────────────────────────────
 # MAIN INTERFACE
 # ──────────────────────────────────────────────────────────────
