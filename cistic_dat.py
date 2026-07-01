@@ -22,7 +22,7 @@ except Exception as e:
     st.error(f"❌ Chyba při načítání API klíče ze Streamlit Secrets: {e}")
     client = None
 
-# OPRAVA: Nastaven správný, existující produkční model
+# Tvůj ověřený a funkční model
 MODEL_NAME = "claude-3-5-sonnet-20241022"
 
 # ──────────────────────────────────────────────────────────────
@@ -69,7 +69,7 @@ if prompt_mode == "Rychlé předvolby tónu":
         "Tón e-commerce popisku:",
         ["Profesionální a důvěryhodný", "Přátelský a lidský", "Úderný a prodejní (Hard-sell)", "Eko / Udržitelný styl"]
     )
-    ai_instruction = f"Tón popisku musí být: {ai_tone}."
+    ai_instruction = f"Tón popisku mustí být: {ai_tone}."
 else:
     ai_tone = "Vlastní prompt"
     ai_instruction = st.sidebar.text_area(
@@ -92,11 +92,10 @@ def clean_product_name(name, user_stopwords, selected_characters):
     
     if clean_marketing_percentages:
         for word in user_stopwords:
-            pattern1 = r"\b" + re.escape(word) + r"\b\s*[-–]?\d+\s*%"
-            pattern2 = r"[-–]?\d+\s*%\s*\b" + re.escape(word) + r"\b"
+            pattern1 = r"\b" + re.escape(word) + r"\b\s*\d+\s*%"
+            pattern2 = r"\d+\s*%\s*\b" + re.escape(word) + r"\b"
             result = re.sub(pattern1, "", result, flags=re.IGNORECASE)
             result = re.sub(pattern2, "", result, flags=re.IGNORECASE)
-        result = re.sub(r"\b[-–]?\d+\s*%\b", "", result)
             
     for word in user_stopwords:
         word_pattern = r"\b" + re.escape(word) + r"\b"
@@ -157,11 +156,11 @@ def enrich_product_with_ai(clean_name, original_name, max_chars, instruction):
 # HLAVNÍ ROZHRANÍ
 # ──────────────────────────────────────────────────────────────
 st.title("🛍️ AI E-commerce Enricher & Data Cleaner PRO")
-st.caption("Verze: **ENTERPRISE DEMO - FULL DATA RETENTION**")
+st.caption("Verze: **ENTERPRISE DEMO - RETAIN ORIGINAL ROWS**")
 
 tab1, tab2 = st.tabs(["📁 Nahrát soubor (CSV / Excel)", "✍️ Ruční zadání textu"])
 full_products_count = 0
-original_df = None
+df_input = None
 column_with_names = None
 
 with tab1:
@@ -169,21 +168,21 @@ with tab1:
     if uploaded_file is not None:
         try:
             if uploaded_file.name.endswith('.csv'):
-                original_df = pd.read_csv(uploaded_file, sep=None, engine='python', encoding='utf-8-sig')
+                df_input = pd.read_csv(uploaded_file, sep=None, engine='python', encoding='utf-8-sig')
             else:
-                original_df = pd.read_excel(uploaded_file)
+                df_input = pd.read_excel(uploaded_file)
             
-            column_with_names = st.selectbox("Vyberte sloupec s názvy produktů:", original_df.columns)
+            column_with_names = st.selectbox("Vyberte sloupec s názvy produktů:", df_input.columns)
             
-            full_products_count = len(original_df)
+            full_products_count = len(df_input)
             st.write("---")
             st.subheader("📊 Statistiky nahraného souboru")
             
             col_stat1, col_stat2 = st.columns(2)
             with col_stat1:
-                st.metric(label="Celkový počet položek v souboru", value=f"{full_products_count} ks")
+                st.metric(label="Celkový počet nalezených produktů v souboru", value=f"{full_products_count} ks")
             with col_stat2:
-                st.info(f"Analyzovaný sloupec pro úpravu: **{column_with_names}**")
+                st.info(f"Analyzovaný sloupec: **{column_with_names}**")
             
             if full_products_count > 20:
                 st.warning(f"💡 **Omezení bezplatné verze:** V rámci Demo režimu můžete jednorázově otestovat transformaci maximálně na **20 produktech**.")
@@ -197,12 +196,16 @@ with tab1:
 
 with tab2:
     if uploaded_file is None:
-        st.info("Pro práci s kompletní tabulkou (kód, cena, sklad...) nahrajte soubor v Tabu 1.")
         sample_data = "!!! BOTY ADIDAS TERREX - DOPRAVA ZDARMA !!!\nSilonové punčochy dnes za 30% dolů"
-        text_input = st.text_area("Alternativní ruční zadání pouze pro test názvů (každý na nový řádek):", value=sample_data, height=100)
+        text_input = st.text_area("Vložte názvy (každý na nový řádek):", value=sample_data, height=120)
         if text_input:
             lines = [line.strip() for line in text_input.split("\n") if line.strip()]
-            original_df = pd.DataFrame({"název": lines, "kód": [f"TEST-{i}" for i in range(len(lines))], "cena": [999]*len(lines)})
+            df_input = pd.DataFrame({
+                "kód": [f"TEST-{i+1}" for i in range(len(lines))],
+                "název": lines,
+                "cena": [499] * len(lines),
+                "popis": [""] * len(lines)
+            })
             column_with_names = "název"
             full_products_count = len(lines)
 
@@ -216,54 +219,47 @@ if "was_truncated" not in st.session_state:
 run_main = st.button("🚀 Spustit kompletní transformaci dat", type="primary")
 
 # ──────────────────────────────────────────────────────────────
-# SPUŠTĚNÍ TRANSFORMACE (OPRAVENO: ZACHOVÁVÁ CELOU TABULKU)
+# SPUŠTĚNÍ TRANSFORMACE (OPRAVA: ZACHOVÁVÁ PŮVODNÍ SLUPCE)
 # ──────────────────────────────────────────────────────────────
-if (run_main or run_sidebar) and original_df is not None and column_with_names is not None:
+if (run_main or run_sidebar) and df_input is not None and column_with_names is not None:
     if not client:
         st.error("Nemohu spustit transformaci, protože API klíč Anthropic není správně nakonfigurován.")
     else:
-        # Vytvoření pracovní kopie s omezením na 20 produktů pro demo, ale se VŠEMI sloupci
-        if len(original_df) > 20:
+        # Vytvoření demo výseče, ale s kompletní sadou všech sloupců
+        if len(df_input) > 20:
             st.session_state.was_truncated = True
             if demo_selection_strategy == "Náhodný výběr 20 produktů":
-                working_df = original_df.sample(n=20, random_state=random.randint(1, 100)).copy()
+                working_df = df_input.sample(n=20, random_state=random.randint(1, 100)).copy()
             else:
-                working_df = original_df.iloc[:20].copy()
+                working_df = df_input.iloc[:20].copy()
         else:
-            working_df = original_df.copy()
+            working_df = df_input.copy()
             st.session_state.was_truncated = False
             
         limit = len(working_df)
         audit_statuses = []
-        regex_cleaned = []
         final_names = []
         final_descriptions = []
-        seo_keywords = []
         
         progress_bar = st.progress(0)
         status_text = st.empty()
         start_bulk_time = time.time()
         
         for idx in range(limit):
-            status_text.text(f"Zpracovávám produkt {idx + 1} z {limit}...")
+            status_text.text(f"Zpracovávám {idx + 1} z {limit}...")
             original_name = str(working_df.iloc[idx][column_with_names])
             
-            # 1. Krok: Čištění přes Regex filtry
+            # 1. Krok: Vyčištění přes Regex
             clean_name = clean_product_name(original_name, custom_stopwords, all_selected_chars)
             if not clean_name:
                 clean_name = "Produkt"
-            
-            # 2. Krok: Obohacení přes AI
+                
+            # 2. Krok: Obohacení a kontrola přes AI
             ai_data = enrich_product_with_ai(clean_name, original_name, max_char_length, ai_instruction)
             
             audit_statuses.append(ai_data.get("audit_status", "✅ V pořádku"))
-            regex_cleaned.append(clean_name)
             final_names.append(ai_data.get("nazev_opraveny", clean_name))
             final_descriptions.append(ai_data.get("popis", ""))
-            
-            kw_data = ai_data.get("klicova_slova", [])
-            kw_str = ", ".join(kw_data) if isinstance(kw_data, list) else str(kw_data)
-            seo_keywords.append(kw_str)
             
             progress_bar.progress((idx + 1) / limit)
             
@@ -271,68 +267,74 @@ if (run_main or run_sidebar) and original_df is not None and column_with_names i
         progress_bar.empty()
         st.session_state.total_time = round(time.time() - start_bulk_time, 1)
         
-        # Nalezení nebo vytvoření sloupce pro popis v původní struktuře
-        desc_col = None
+        # Automatická detekce sloupce s popisem, abychom ho správně přepsali
+        desc_column = None
         for col in working_df.columns:
             if str(col).lower().strip() in ["popis", "description"]:
-                desc_col = col
+                desc_column = col
                 break
-        if desc_col is None:
-            desc_col = "popis"
+        if desc_column is None:
+            desc_column = "popis"
             
-        # ZÁPIS DO KOPÍROVANÉ KOMPLETNÍ TABULKY (Přepíšeme jen to co chceme, zbytek dat zůstává!)
+        # PŘEPSÁNÍ DAT V KOMPLETNÍM ŘÁDKU (Ostatní sloupce jako kód, cena zůstanou beze změny)
         working_df[column_with_names] = final_names
-        working_df[desc_col] = final_descriptions
+        working_df[desc_column] = final_descriptions
         
-        # Pomocné sloupce přidáme na začátek/konec pouze pro zobrazení v editoru
+        # Přidání stavu auditu jako prvního sloupce pro tabulkový přehled
+        if "🔍 Stav auditu" in working_df.columns:
+            working_df = working_df.drop(columns=["🔍 Stav auditu"])
         working_df.insert(0, "🔍 Stav auditu", audit_statuses)
-        working_df["Původní název před čištěním"] = original_df[column_with_names].loc[working_df.index]
-        working_df["SEO Klíčová slova"] = seo_keywords
         
         st.session_state.processed_df = working_df
 
 # ──────────────────────────────────────────────────────────────
-# ZOBRAZENÍ VÝSLEDKŮ A EXPORT CELÉ TABULKY
+# ZOBRAZENÍ VÝSLEDKŮ A EXPORT KOMPLETNÍCH DAT
 # ──────────────────────────────────────────────────────────────
 if st.session_state.processed_df is not None:
     df_results = st.session_state.processed_df
     
     st.write("---")
-    st.subheader("✨ Výsledky kompletní transformace")
+    st.subheader("✨ Výsledky transformace")
     
     if st.session_state.was_truncated:
-        st.warning(f"⚠️ **Ukázka zpracování dat dokončena:** Ze souboru o celkovém počtu {full_products_count} položek bylo vybráno 20 vzorků. Všechny jejich původní sloupce (kód, cena, sklad...) byly kompletně zachovány.")
+        st.warning(f"⚠️ **Ukázka zpracování dat dokončena:** Ze souboru o celkovém počtu {full_products_count} položek bylo vybráno a obohaceno 20 vzorků. Všechny původní sloupce byly zachovány.")
         
     col_kpi1, col_kpi2 = st.columns(2)
     with col_kpi1:
-        st.metric(label="Počet řádků připravených k exportu", value=f"{len(df_results)} ks")
+        st.metric(label="Zobrazeno řádků v tabulce", value=f"{len(df_results)} ks")
     with col_kpi2:
         st.metric(label="Čas zpracování AI", value=f"{st.session_state.total_time} s")
     
     st.write("---")
-    st.subheader("📊 KONTROLA A RYCHLÁ EDITACE CELÉHO SOUBORU")
-    st.info("💡 Tabulka níže obsahuje VŠECHNY sloupce z vašeho původního souboru. Názvy a Popisy byly přepsány novými daty. Můžete je zde přímo upravit.")
+    st.write("### 📥 Export a nastavení stahovaných dat")
     
-    # Interaktivní data editor nad kompletní tabulkou
-    edited_df = st.data_editor(df_results, use_container_width=True)
+    # Nabídne k výběru VŠECHNY sloupce, které v tabulce reálně jsou
+    export_columns = st.multiselect(
+        "Vyberte sloupce, které chcete zahrnout do výsledného exportu (předvybrali jsme pro vás kompletní sadu):",
+        options=list(df_results.columns),
+        default=list(df_results.columns)
+    )
+    
+    if not export_columns:
+        st.error("⚠️ Musíte vybrat alespoň jeden sloupec pro export.")
+    else:
+        df_to_export = df_results[export_columns].copy()
+        
+        # Odstraníme pomocný sloupec Auditu z finálního CSV, pokud tam je vybrán, aby to Shoptet neshodil
+        if "🔍 Stav auditu" in df_to_export.columns:
+            df_to_export = df_to_export.drop(columns=["🔍 Stav auditu"])
+            
+        col_btn1, col_btn2 = st.columns(2)
+        with col_btn1:
+            csv_buffer = df_to_export.to_csv(index=False, encoding='utf-8-sig', sep=';')
+            st.download_button(label="📥 Stáhnout kompletní Shoptet CSV", data=csv_buffer, file_name="shoptet_clean_data.csv", mime="text/csv", use_container_width=True)
+        with col_btn2:
+            json_buffer = json.dumps(df_to_export.to_dict(orient="records"), ensure_ascii=False, indent=2)
+            st.download_button(label="📥 Stáhnout kompletní JSON", data=json_buffer, file_name="shoptet_clean_data.json", mime="application/json", use_container_width=True)
     
     st.write("---")
-    st.write("### 📥 Stažení kompletních dat pro Shoptet")
+    st.subheader("📊 KONTROLA: Audit a rychlá editace dat")
+    st.info("💡 Tabulka obsahuje všechny původní sloupce z vašeho nahraného souboru. Sloupce s názvem produktu a popisem byly nahrazeny čistými marketingovými daty.")
     
-    # Příprava čistého exportu bez pomocných sloupců zobrazení
-    download_df = pd.DataFrame(edited_df)
-    if "🔍 Stav auditu" in download_df.columns:
-        download_df = download_df.drop(columns=["🔍 Stav auditu"])
-    if "Původní název před čištěním" in download_df.columns:
-        download_df = download_df.drop(columns=["Původní název před čištěním"])
-    if "SEO Klíčová slova" in download_df.columns:
-        download_df = download_df.drop(columns=["SEO Klíčová slova"])
-        
-    csv_buffer = download_df.to_csv(index=False, encoding='utf-8-sig', sep=';')
-    st.download_button(
-        label="📥 STÁHNOUT KOMPLETNÍ UPRAVENÝ SOUBOR (ZACHOVÁVÁ KÓDY, CENY, SKLAD ATD.)", 
-        data=csv_buffer, 
-        file_name="shoptet_complete_enriched.csv", 
-        mime="text/csv", 
-        use_container_width=True
-    )
+    edited_df = st.data_editor(df_results, use_container_width=True)
+    st.session_state.processed_df = pd.DataFrame(edited_df)
