@@ -1,4 +1,3 @@
-
 import streamlit as st
 import anthropic
 import json
@@ -65,6 +64,9 @@ prompt_mode = st.sidebar.radio(
     ["Rychlé předvolby tónu", "Vlastní zadání (Prompt / Instrukce)"]
 )
 
+# BEZPEČNÁ INICIALIZACE - Ošetření proti chybě 400 v API
+ai_instruction = "Tón popisku musí být: Profesionální a důvěryhodný."
+
 if prompt_mode == "Rychlé předvolby tónu":
     ai_tone = st.sidebar.selectbox(
         "Tón e-commerce popisku:",
@@ -72,11 +74,12 @@ if prompt_mode == "Rychlé předvolby tónu":
     )
     ai_instruction = f"Tón popisku musí být: {ai_tone}."
 else:
-    ai_tone = "Vlastní prompt"
-    ai_instruction = st.sidebar.text_area(
+    ai_user_input = st.sidebar.text_area(
         "Napište instrukce pro AI (co má s textem udělat):",
         value="Napiš to jako kreativní a vtipný post na sociální sítě, přidej emoji a na konec doplň hashtags.",
     )
+    if ai_user_input.strip():
+        ai_instruction = ai_user_input.strip()
 
 max_char_length = st.sidebar.slider("Maximální délka popisku (znaků):", min_value=50, max_value=1000, value=250)
 
@@ -118,6 +121,10 @@ def enrich_product_with_ai(clean_name, original_name, max_chars, instruction):
     if not client:
         return {"audit_status": "❌ Chyba", "nazev_opraveny": clean_name, "popis": "Chyba: API klient není inicializován.", "klicova_slova": []}
     
+    # Pojistka pro případ, že by instrukce byla prázdná
+    if not instruction or not str(instruction).strip():
+        instruction = "Vytvoř standardní, lákavý e-commerce popisek."
+
     text_zadani = (
         "Jsi špičkový e-commerce copywriter a auditor produktových dat. "
         "Tvým úkolem je nejprve zkontrolovat sloupec 'Regex čištění' (Cleaned Name) a posoudit, zda dává smysl jako název produktu, nebo zda v něm nezůstal balast či chyba. "
@@ -267,7 +274,6 @@ if (run_main or run_sidebar) and df_input is not None and column_with_names is n
         for idx in range(limit):
             status_text.text(f"Zpracovávám {idx + 1} z {limit}...")
             
-            # OPRAVENO: Bezpečné získání hodnoty z 2D matice
             col_idx = working_df.columns.get_loc(column_with_names)
             original_name = str(working_df.iloc[idx, col_idx])
             
@@ -276,7 +282,7 @@ if (run_main or run_sidebar) and df_input is not None and column_with_names is n
             if not clean_name:
                 clean_name = "Produkt"
                 
-            # 2. Krok: Obohacení a kontrola přes AI
+            # 2. Krok: Obohacení a kontrola přes AI (S garantovaným promptem)
             ai_data = enrich_product_with_ai(clean_name, original_name, max_char_length, ai_instruction)
             
             audit_statuses.append(ai_data.get("audit_status", "✅ V pořádku"))
