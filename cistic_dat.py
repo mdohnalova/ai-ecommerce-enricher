@@ -13,16 +13,16 @@ import pandas as pd
 st.set_page_config(page_title="AI E-commerce Enricher PRO", page_icon="🛍️", layout="wide")
 
 # ──────────────────────────────────────────────────────────────
-# INICIALIZACE SKUTEČNÉHO ANTHROPIC CLIENTA (BEZ TESTOVACÍCH PODMÍNEK)
+# INICIALIZACE ANTHROPIC CLIENTA
 # ──────────────────────────────────────────────────────────────
 try:
-    # Načtení klíče přesně podle formátu Streamlit Secrets [anthropic] api_key
     api_key = st.secrets["anthropic"]["api_key"]
     client = anthropic.Anthropic(api_key=api_key)
 except Exception as e:
     st.error(f"❌ Chyba při načítání API klíče ze Streamlit Secrets: {e}")
     client = None
 
+# Tvůj ověřený a funkční model
 MODEL_NAME = "claude-sonnet-4-6"
 
 # ──────────────────────────────────────────────────────────────
@@ -83,7 +83,7 @@ st.sidebar.write("---")
 run_sidebar = st.sidebar.button("🚀 Spustit kompletní transformaci", key="sidebar_run_btn", use_container_width=True)
 
 # ──────────────────────────────────────────────────────────────
-# LOGIKA ČIŠTĚNÍ
+# LOGIKA ČIŠTĚNÍ (REGEX / STRIP)
 # ──────────────────────────────────────────────────────────────
 def clean_product_name(name, user_stopwords, selected_characters):
     if not name or pd.isna(name):
@@ -108,36 +108,41 @@ def clean_product_name(name, user_stopwords, selected_characters):
     if clean_numbers:
         result = re.sub(r"\b\d+\b", "", result)
         
-    result = re.sub(r"\s+", " ", result).strip()
-    return result
-    
-# DEFINITIVNÍ OPRAVA PRO CLAUDE-SONNET-4-6 (NUCENÝ JSON FORMAT)
+    return re.sub(r"\s+", " ", result).strip()
+
+# ──────────────────────────────────────────────────────────────
+# INTELIGENTNÍ AI TRANSFORMACE + AUDIT NÁZVŮ
+# ──────────────────────────────────────────────────────────────
 def enrich_product_with_ai(clean_name, original_name, max_chars, instruction):
     if not client:
-        return {"nazev_opraveny": clean_name, "popis": "Chyba: API klient není inicializován.", "klicova_slova": []}
+        return {"audit_status": "❌ Chyba", "nazev_opraveny": clean_name, "popis": "Chyba: API klient není inicializován.", "klicova_slova": []}
     
     text_zadani = (
-        "Jsi špičkový e-commerce copywriter. Tvým úkolem je vytvořit marketingové podklady pro e-shop. "
-        "Odpověď musí být validní JSON struktura. "
-        f"Základní vyčištěný název produktu: {clean_name}. "
-        f"Původní neočištěný název: {original_name}. "
-        f"Instrukce pro styl a tón textu: {instruction}. "
-        f"Maximální délka popisku: {max_chars} znaků. "
-        'Struktura JSON, kterou musíš striktně dodržet: {"nazev_opraveny": "...", "popis": "...", "klicova_slova": ["...", "..."]}'
+        "Jsi špičkový e-commerce copywriter a auditor produktových dat. "
+        "Tvým úkolem je nejprve zkontrolovat sloupec 'Regex čištění' (Cleaned Name) a posoudit, zda dává smysl jako název produktu, nebo zda v něm nezůstal balast či chyba. "
+        "Odpověď musí být výhradně platná JSON struktura.\n\n"
+        f"Původní neočištěný název pro kontext: {original_name}\n"
+        f"Očištěný název z Regex filtru (zkontroluj ho!): {clean_name}\n"
+        f"Instrukce pro popis: {instruction}\n"
+        f"Maximální délka popisku: {max_chars} znaků.\n\n"
+        "PRAVIDLA PRO AUDIT (audit_status):\n"
+        "1. Pokud je očištěný název gramaticky v pořádku, srozumitelný a bez zapomenutých znaků, vrať: '✅ V pořádku'.\n"
+        "2. Pokud očištěný název obsahuje zapomenuté divné znaky, nedává smysl, nebo v něm uživatel zřejmě zapomněl něco odmazat, vrať: '⚠️ AI doporučuje úpravu'.\n"
+        "3. Pokud je očištěný název prázdný nebo úplně zničený, vrať: '❌ Prázdný název'.\n\n"
+        "V poli 'nazev_opraveny' navrhni finální reprezentativní název produktu pro e-shop.\n\n"
+        'Struktura JSON, kterou musíš striktně dodržet: '
+        '{"audit_status": "...", "nazev_opraveny": "...", "popis": "...", "klicova_slova": ["...", "..."]}'
     )
     
     try:
-        # Použijeme standardní volání, ale text omezíme na nucený začátek uvozovek pro JSON
         response = client.messages.create(
             model=MODEL_NAME, 
             max_tokens=1024, 
             messages=[{"role": "user", "content": text_zadani}]
         )
         
-        # Ošetření: Odstraníme případný balast okolo JSONu, pokud by ho AI přece jen napsala
         raw_text = response.content[0].text.strip()
         if not raw_text.startswith("{"):
-            # Najdeme kde JSON začíná a končí
             start_idx = raw_text.find("{")
             end_idx = raw_text.rfind("}") + 1
             if start_idx != -1 and end_idx != 0:
@@ -145,7 +150,8 @@ def enrich_product_with_ai(clean_name, original_name, max_chars, instruction):
 
         return json.loads(raw_text)
     except Exception as e:
-        return {"nazev_opraveny": clean_name, "popis": f"AI Chyba zpracování: {str(e)}", "klicova_slova": ["chyba"]}
+        return {"audit_status": "❌ Chyba", "nazev_opraveny": clean_name, "popis": f"AI Chyba: {str(e)}", "klicova_slova": ["chyba"]}
+
 # ──────────────────────────────────────────────────────────────
 # HLAVNÍ ROZHRANÍ
 # ──────────────────────────────────────────────────────────────
@@ -184,7 +190,7 @@ with tab1:
                 st.info(f"Analyzovaný sloupec: **{column_with_names}**")
             
             if full_products_count > 20:
-                st.warning(f"💡 **Omezení bezplatné verze:** V souboru bylo úspěšně nalezeno všech **{full_products_count}** produktů. V rámci Demo režimu však můžete jednorázově otestovat transformaci maximálně na **20 produktech**.")
+                st.warning(f"💡 **Omezení bezplatné verze:** V rámci Demo režimu můžete jednorázově otestovat transformaci maximálně na **20 produktech**.")
                 demo_selection_strategy = st.radio(
                     "Vyberte, jakých 20 vzorků chcete z nahrávky vyzkoušet:",
                     ["Prvních 20 produktů", "Náhodný výběr 20 produktů"]
@@ -216,7 +222,7 @@ if run_main or run_sidebar:
     if not final_products_list:
         st.error("Žádná data k analýze.")
     elif not client:
-        st.error("Nemohu spustit transformaci, protože API klíč Anthropic není správně nakonfigurován ve Streamlit Secrets.")
+        st.error("Nemohu spustit transformaci, protože API klíč Anthropic není správně nakonfigurován.")
     else:
         if len(final_products_list) > 20:
             st.session_state.was_truncated = True
@@ -236,27 +242,24 @@ if run_main or run_sidebar:
         for idx, original_name in enumerate(processing_list):
             status_text.text(f"Zpracovávám {idx + 1} z {len(processing_list)}...")
             
+            # 1. Krok: Očištění názvu pomocí tvých nastavených filtrů
             clean_name = clean_product_name(original_name, custom_stopwords, all_selected_chars)
+            if not clean_name:
+                clean_name = "Vymazáno"
+                
+            # 2. Krok: Ostré AI vyhodnocení kvality očištění a vytvoření popisků
             ai_data = enrich_product_with_ai(clean_name, original_name, max_char_length, ai_instruction)
             
+            audit_status = ai_data.get("audit_status", "✅ V pořádku")
             final_title = ai_data.get("nazev_opraveny", clean_name)
+            
             kw_data = ai_data.get("klicova_slova", [])
             kw_str = ", ".join(kw_data) if isinstance(kw_data, list) else str(kw_data)
-            
-            suspicious_chars = re.findall(r"[^\w\s.,%\-\u00C0-\u017F]", str(clean_name))
-            
-            if suspicious_chars:
-                unique_chars = "".join(sorted(list(set(suspicious_chars))))
-                audit_status = f"⚠️ Opravit znaky ({unique_chars})"
-            elif not clean_name or clean_name == "Vymazáno":
-                audit_status = "❌ Prázdný název"
-            else:
-                audit_status = "✅ V pořádku"
             
             results.append({
                 "🔍 Stav auditu": audit_status,
                 "Původní text": original_name,
-                "Regex čištění": clean_name if clean_name else "Vymazáno",
+                "Regex čištění": clean_name,
                 "Finální název (AI)": final_title,
                 "AI Popisek (Shoptet Ready)": ai_data.get("popis", ""),
                 "SEO Klíčová slova": kw_str
@@ -279,9 +282,7 @@ if st.session_state.processed_df is not None:
     st.subheader("✨ Výsledky transformace")
     
     if st.session_state.was_truncated:
-        st.warning(f"⚠️ **Ukázka zpracování dat dokončena:** Ze souboru o celkovém počtu {full_products_count} položek bylo na základě vaší volby vybráno a obohaceno 20 vzorků. Kompletní databázi vám rádi odemkneme v plné verzi.")
-    else:
-        st.success("✅ Všechny produkty ze souboru byly úspěšně zpracovány.")
+        st.warning(f"⚠️ **Ukázka zpracování dat dokončena:** Ze souboru o celkovém počtu {full_products_count} položek bylo vybráno a obohaceno 20 vzorků.")
         
     col_kpi1, col_kpi2, col_kpi3 = st.columns(3)
     with col_kpi1:
@@ -296,9 +297,9 @@ if st.session_state.processed_df is not None:
     st.write("### 📥 Export a nastavení stahovaných dat")
     
     export_columns = st.multiselect(
-        "Vyberte sloupce, které chcete zahrnout do výsledného exportu (CSV / JSON):",
+        "Vyberte sloupce, které chcete zahrnout do výsledného exportu:",
         options=list(df_results.columns),
-        default=list(df_results.columns)
+        default=["🔍 Stav auditu", "Regex čištění", "Finální název (AI)", "AI Popisek (Shoptet Ready)", "SEO Klíčová slova"]
     )
     
     if not export_columns:
@@ -306,19 +307,17 @@ if st.session_state.processed_df is not None:
     else:
         df_to_export = df_results[export_columns]
         
-        col_btn1, col_btn2, col_btn3 = st.columns([2, 2, 3])
+        col_btn1, col_btn2 = st.columns(2)
         with col_btn1:
             csv_buffer = df_to_export.to_csv(index=False, encoding='utf-8-sig')
             st.download_button(label="📥 Stáhnout Shoptet CSV", data=csv_buffer, file_name="shoptet_clean_data.csv", mime="text/csv", use_container_width=True)
         with col_btn2:
             json_buffer = json.dumps(df_to_export.to_dict(orient="records"), ensure_ascii=False, indent=2)
             st.download_button(label="📥 Stáhnout kompletní JSON", data=json_buffer, file_name="shoptet_clean_data.json", mime="application/json", use_container_width=True)
-        with col_btn3:
-            st.button("🔗 Kopírovat odkaz pro sdílení výsledků", on_click=lambda: st.toast("Odkaz byl zkopírován do schránky!"), use_container_width=True)
     
     st.write("---")
-    st.subheader("📊 2. KROK KONTROLY: Audit a rychlá editace dat")
-    st.info("💡 **Tip pro audit:** Kliknutím na záhlaví sloupce **🔍 Stav auditu** seřadíte položky tak, aby se řádky označené s **⚠️** posunuly nahoru a mohli jste je bleskově ručně opravit.")
+    st.subheader("📊 KONTROLA: Audit a rychlá editace dat")
+    st.info("💡 **Jak na rychlou opravu:** Kliknutím na záhlaví sloupce **🔍 Stav auditu** seřadíte položky tak, aby varování ⚠️ vyskočila nahoru. Ve sloupci **Finální název (AI)** nebo **Regex čištění** pak stačí na buňku 2x kliknout a hodnotu okamžitě ručně přepsat.")
     
     edited_df = st.data_editor(df_results, use_container_width=True)
     st.session_state.processed_df = pd.DataFrame(edited_df)
