@@ -64,7 +64,7 @@ prompt_mode = st.sidebar.radio(
     ["Rychlé předvolby tónu", "Vlastní zadání (Prompt / Instrukce)"]
 )
 
-# BEZPEČNÁ INICIALIZACE - Ošetření proti chybě 400 v API
+# Bezpečná výchozí instrukce
 ai_instruction = "Tón popisku musí být: Profesionální a důvěryhodný."
 
 if prompt_mode == "Rychlé předvolby tónu":
@@ -118,28 +118,36 @@ def clean_product_name(name, user_stopwords, selected_characters):
 # INTELIGENTNÍ AI TRANSFORMACE + AUDIT NÁZVŮ
 # ──────────────────────────────────────────────────────────────
 def enrich_product_with_ai(clean_name, original_name, max_chars, instruction):
+    # Definice nouzového plánu (fallbacku) přímo na začátku, aby nikdy nevznikl KeyError
+    fallback = {
+        "audit_status": "⚠️ Chyba zpracování", 
+        "nazev_opraveny": str(clean_name), 
+        "popis": "Nepodařilo se vygenerovat AI popis kvůli chybě formátu odpovědi.", 
+        "klicova_slova": []
+    }
+
     if not client:
-        return {"audit_status": "❌ Chyba", "nazev_opraveny": clean_name, "popis": "Chyba: API klient není inicializován.", "klicova_slova": []}
+        fallback["popis"] = "Chyba: API klient není inicializován."
+        return fallback
     
-    # Pojistka pro případ, že by instrukce byla prázdná
     if not instruction or not str(instruction).strip():
         instruction = "Vytvoř standardní, lákavý e-commerce popisek."
 
     text_zadani = (
         "Jsi špičkový e-commerce copywriter a auditor produktových dat. "
-        "Tvým úkolem je nejprve zkontrolovat sloupec 'Regex čištění' (Cleaned Name) a posoudit, zda dává smysl jako název produktu, nebo zda v něm nezůstal balast či chyba. "
-        "Odpověď musí být výhradně platná JSON struktura.\n\n"
+        "Tvým úkolem je zkontrolovat 'Očištěný název z Regex filtru' a posoudit, zda dává smysl jako název produktu pro e-shop.\n\n"
         f"Původní neočištěný název pro kontext: {original_name}\n"
-        f"Očištěný název z Regex filtru (zkontroluj ho!): {clean_name}\n"
-        f"Instrukce pro popis: {instruction}\n"
+        f"Očištěný název z Regex filtru: {clean_name}\n"
+        f"Instrukce pro marketingový popis: {instruction}\n"
         f"Maximální délka popisku: {max_chars} znaků.\n\n"
-        "PRAVIDLA PRO AUDIT (audit_status):\n"
-        "1. Pokud je očištěný název gramaticky v pořádku, srozumitelný a bez zapomenutých znaků, vrať: '✅ V pořádku'.\n"
-        "2. Pokud očištěný název obsahuje zapomenuté divné znaky, nedává smysl, nebo v něm uživatel zřejmě zapomněl něco odmazat, vrať: '⚠️ AI doporučuje úpravu'.\n"
-        "3. Pokud je očištěný název prázdný nebo úplně zničený, vrať: '❌ Prázdný název'.\n\n"
-        "V poli 'nazev_opraveny' navrhni finální reprezentativní název produktu pro e-shop.\n\n"
-        'Struktura JSON, kterou musíš striktně dodržet: '
-        '{"audit_status": "...", "nazev_opraveny": "...", "popis": "...", "klicova_slova": ["...", "..."]}'
+        "PRAVIDLA PRO pole 'audit_status':\n"
+        "1. Pokud je očištěný název gramaticky v pořádku a srozumitelný, vrať: '✅ V pořádku'.\n"
+        "2. Pokud očištěný název obsahuje zapomenuté divné znaky nebo nedává smysl, vrať: '⚠️ AI doporučuje úpravu'.\n"
+        "3. Pokud je očištěný název prázdný, vrať: '❌ Prázdný název'.\n\n"
+        "Tvůj výstup MUSÍ být pouze a jenom platný JSON objekt bez jakýchkoliv keců, úvodních slov nebo vysvětlování. "
+        "Všechny uvozovky uvnitř textů v JSONu řádně vyescapuj pomocí zpětného lomítka (\\\\\"), aby byl JSON validní.\n\n"
+        "Struktura JSON, kterou musíš striktně dodržet:\n"
+        '{"audit_status": "...", "nazev_opraveny": "...", "popis": "...", "klicova_slova": ["klíč1", "klíč2"]}'
     )
     
     try:
@@ -150,15 +158,26 @@ def enrich_product_with_ai(clean_name, original_name, max_chars, instruction):
         )
         
         raw_text = response.content[0].text.strip() if isinstance(response.content, list) else response.content.strip()
+        
+        # Extrakce JSONu, pokud by přece jen poslal text okolo
         if not raw_text.startswith("{"):
             start_idx = raw_text.find("{")
             end_idx = raw_text.rfind("}") + 1
             if start_idx != -1 and end_idx != 0:
                 raw_text = raw_text[start_idx:end_idx]
 
-        return json.loads(raw_text)
+        parsed_json = json.loads(raw_text)
+        
+        # Garantujeme, že JSON obsahuje všechny potřebné klíče, než ho vrátíme
+        for key in fallback.keys():
+            if key not in parsed_json:
+                parsed_json[key] = fallback[key]
+                
+        return parsed_json
+
     except Exception as e:
-        return {"audit_status": "❌ Chyba", "nazev_opraveny": clean_name, "popis": f"AI Chyba: {str(e)}", "klicova_slova": ["chyba"]}
+        fallback["popis"] = f"AI Došlo k chybě při parsování: {str(e)}"
+        return fallback
 
 # ──────────────────────────────────────────────────────────────
 # HLAVNÍ ROZHRANÍ
@@ -171,7 +190,7 @@ full_products_count = 0
 df_input = None
 column_with_names = None
 desc_column = None
-demo_selection_strategy = "Prvních 20 produktů"  # Bezpečný default
+demo_selection_strategy = "Prvních 20 produktů"
 
 with tab1:
     uploaded_file = st.file_uploader("Vyberte soubor s produkty", type=["csv", "xlsx"])
@@ -182,7 +201,6 @@ with tab1:
             else:
                 df_input = pd.read_excel(uploaded_file)
             
-            # Najde sloupec s názvem
             for col in df_input.columns:
                 if str(col).lower().strip() in ["name", "název", "nazev"]:
                     column_with_names = col
@@ -190,7 +208,6 @@ with tab1:
             if column_with_names is None:
                 column_with_names = df_input.columns[0]
                 
-            # Najde sloupec s popisem
             for col in df_input.columns:
                 if str(col).lower().strip() in ["description", "popis"]:
                     desc_column = col
@@ -250,7 +267,6 @@ if (run_main or run_sidebar) and df_input is not None and column_with_names is n
     if not client:
         st.error("Nemohu spustit transformaci, protože API klíč Anthropic není správně nakonfigurován.")
     else:
-        # Bezpečné vytvoření pracovního DataFrame bez varování o kopii
         if len(df_input) > 20:
             st.session_state.was_truncated = True
             if demo_selection_strategy == "Náhodný výběr 20 produktů":
@@ -270,7 +286,6 @@ if (run_main or run_sidebar) and df_input is not None and column_with_names is n
         status_text = st.empty()
         start_bulk_time = time.time()
         
-        # Čisté 2D indexování pomocí iloc[řádek, sloupec_index]
         for idx in range(limit):
             status_text.text(f"Zpracovávám {idx + 1} z {limit}...")
             
@@ -282,12 +297,12 @@ if (run_main or run_sidebar) and df_input is not None and column_with_names is n
             if not clean_name:
                 clean_name = "Produkt"
                 
-            # 2. Krok: Obohacení a kontrola přes AI (S garantovaným promptem)
+            # 2. Krok: Obohacení s garantovanou JSON strukturou
             ai_data = enrich_product_with_ai(clean_name, original_name, max_char_length, ai_instruction)
             
-            audit_statuses.append(ai_data.get("audit_status", "✅ V pořádku"))
-            final_names.append(ai_data.get("nazev_opraveny", clean_name))
-            final_descriptions.append(ai_data.get("popis", ""))
+            audit_statuses.append(ai_data["audit_status"])
+            final_names.append(ai_data["nazev_opraveny"])
+            final_descriptions.append(ai_data["popis"])
             
             progress_bar.progress((idx + 1) / limit)
             
@@ -295,15 +310,12 @@ if (run_main or run_sidebar) and df_input is not None and column_with_names is n
         progress_bar.empty()
         st.session_state.total_time = round(time.time() - start_bulk_time, 1)
         
-        # Pojistka struktury tabulky
         if desc_column not in working_df.columns:
             working_df[desc_column] = ""
             
-        # Zápis přes .loc na základě aktuálních indexů
         working_df.loc[:, column_with_names] = final_names
         working_df.loc[:, desc_column] = final_descriptions
         
-        # Odstranění starého a vložení čistého pomocného auditního sloupce na začátek
         if "🔍 Stav auditu" in working_df.columns:
             working_df = working_df.drop(columns=["🔍 Stav auditu"])
         working_df.insert(0, "🔍 Stav auditu", audit_statuses)
@@ -320,7 +332,7 @@ if st.session_state.processed_df is not None:
     st.subheader("✨ Výsledky transformace")
     
     if st.session_state.was_truncated:
-        st.warning(f"⚠️ **Ukázka zpracování dat dokončena:** Ze souboru o celkovém počtu {full_products_count} položek bylo vybráno 20 vzorků. Všechny původní sloupce byly zachovány.")
+        st.warning(f"⚠️ **Ukázka zpracování dat dokončena:** Ze souboru o celkovém počtu {full_products_count} položek bylo vybráno 20 vzorků.")
         
     col_kpi1, col_kpi2 = st.columns(2)
     with col_kpi1:
@@ -332,7 +344,6 @@ if st.session_state.processed_df is not None:
     st.write("### 📥 Export stahovaných dat")
     
     df_to_export = df_results.copy()
-    
     if "🔍 Stav auditu" in df_to_export.columns:
         df_to_export = df_to_export.drop(columns=["🔍 Stav auditu"])
         
@@ -347,7 +358,6 @@ if st.session_state.processed_df is not None:
     
     st.write("---")
     st.subheader("📊 KONTROLA: Rychlá editace před stažením")
-    st.info("💡 Tabulka níže obsahuje VŠECHNY původní sloupce z vašeho souboru. Sloupce s názvem a popisem byly bezpečně nahrazeny.")
     
     edited_df = st.data_editor(df_results, use_container_width=True)
     st.session_state.processed_df = pd.DataFrame(edited_df)
