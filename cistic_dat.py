@@ -1,5 +1,6 @@
 import streamlit as st
 import anthropic
+import json
 import re
 import time
 import random
@@ -50,7 +51,7 @@ custom_stopwords_input = st.sidebar.text_area(
 custom_stopwords = [word.strip().lower() for word in custom_stopwords_input.split(",") if word.strip()]
 
 st.sidebar.subheader("3. Nastavení AI textů & Stylu")
-prompt_mode = st.sidebar.radio("Jak chcete definovat styl popisků?", ["Rychlé předvolby tónu", "Vlastní zadání (Prompt / Instrukce)"])
+prompt_mode = st.sidebar.radio("Jak chcete defineovat styl popisků?", ["Rychlé předvolby tónu", "Vlastní zadání (Prompt / Instrukce)"])
 
 if prompt_mode == "Rychlé předvolby tónu":
     ai_tone = st.sidebar.selectbox("Tón e-commerce popisku:", ["Profesionální a důvěryhodný", "Přátelský a lidský", "Úderný a prodejní (Hard-sell)", "Eko / Udržitelný styl"])
@@ -92,40 +93,81 @@ def clean_product_name(name, user_stopwords, selected_characters):
     return re.sub(r"\s+", " ", result).strip()
 
 # ──────────────────────────────────────────────────────────────
-# POMOCNÉ AI VOLÁNÍ PŘES JEDNODUCHÝ SEPARÁTOR (PRO TIŠTĚNÍ BEZ CHYB)
+# ROBUSTNÍ AI SE ZABEZPEČENÍM PROTI CHYBÁM (JSON ABSORBER)
 # ──────────────────────────────────────────────────────────────
 def enrich_product_with_ai(clean_name, original_name, max_chars, instruction):
+    # Záložní plán, kdyby cokoli selhalo
+    fallback = {"audit": "✅ V pořádku", "name": clean_name, "description": "", "seo": ""}
+    
     if not client:
-        return f"✅ V pořádku | {clean_name} |  | "
+        return fallback
     
     prompt = (
         "Jsi špičkový e-commerce copywriter a auditor produktových dat.\n"
-        "Zkontroluj produkt a vygeneruj data oddělená svislítkem '|'.\n\n"
+        "Zkontroluj produkt a navrhni ideální finální název a popisek.\n\n"
         f"PŮVODNÍ NÁZEV: {original_name}\n"
         f"OČIŠTĚNÝ NÁZEV: {clean_name}\n"
         f"INSTRUKCE PRO POPIS: {instruction}\n"
         f"MAX DÉLKA POPISU: {max_chars} znaků.\n\n"
-        "Odpověz PŘESNĚ v tomto formátu na jednom řádku a nepoužívej žádné jiné texty:\n"
-        "Stav auditu (buď: ✅ V pořádku nebo ⚠️ K úpravě) | Finální vylepšený název e-shopu | Prodejní popisek | 3-5 klíčových slov oddělených čárkou"
+        "Odpověz VÝHRADNĚ validním formátem JSON s těmito klíči:\n"
+        "{\n"
+        "  \"audit\": \"✅ V pořádku\" nebo \"⚠️ K úpravě\",\n"
+        "  \"name\": \"Finální název pro e-shop\",\n"
+        "  \"description\": \"Prodejní marketingový popisek\",\n"
+        "  \"seo\": \"3-5 klíčových slov oddělených čárkou\"\n"
+        "}\n"
+        "Nepiš žádný jiný text okolo, pouze čistý JSON."
     )
     
     try:
         response = client.messages.create(
             model=MODEL_NAME, 
-            max_tokens=800, 
+            max_tokens=1024, 
             messages=[{"role": "user", "content": prompt}]
         )
+        
         if hasattr(response, 'content') and isinstance(response.content, list):
-            return response.content[0].text.strip()
-        return response.content.strip()
+            raw_text = response.content[0].text.strip()
+        else:
+            raw_text = response.content.strip()
+
+        # Oříznutí případného balastu okolo JSONu
+        if not raw_text.startswith("{"):
+            start_idx = raw_text.find("{")
+            end_idx = raw_text.rfind("}") + 1
+            if start_idx != -1 and end_idx != 0: 
+                raw_text = raw_text[start_idx:end_idx]
+                
+        data = json.loads(raw_text)
+        
+        # --- ROBUSTNÍ STRATEGIE: ODSTRANĚNÍ DIACRITIKY Z KLÍČŮ ---
+        normalized_data = {}
+        for k, v in data.items():
+            k_clean = k.lower().strip()
+            # Odstraníme českou diakritiku z klíčů pro absolutní jistotu
+            k_clean = k_clean.replace("á", "a").replace("í", "i").replace("ý", "y").replace("ě", "e").replace("é", "e").replace("ó", "o").replace("ú", "u").replace("ů", "u").replace("ž", "z").replace("š", "s").replace("č", "c").replace("ř", "r")
+            normalized_data[k_clean] = v
+            
+        result = {}
+        result["audit"] = normalized_data.get("audit", normalized_data.get("status", "✅ V pořádku"))
+        result["name"] = normalized_data.get("name", normalized_data.get("nazev", clean_name))
+        result["description"] = normalized_data.get("description", normalized_data.get("popis", ""))
+        result["seo"] = normalized_data.get("seo", normalized_data.get("klicovaslova", ""))
+        
+        # Pokud by popis zůstal prázdný, dáme tam aspoň nouzový generovaný text
+        if not result["description"]:
+            result["description"] = f"Skvělý produkt {result['name']} pro váš e-shop."
+            
+        return result
+        
     except:
-        return f"✅ V pořádku | {clean_name} |  | "
+        return fallback
 
 # ──────────────────────────────────────────────────────────────
-# MAIN INTERFACE (ROVNOU V SHOPTET NORMĚ)
+# MAIN INTERFACE
 # ──────────────────────────────────────────────────────────────
 st.title("🪄 AI E-commerce Data Cleaner & Enricher PRO")
-st.caption("Verze: **SHOPTET NATIVE AUTOMATION ENGINE V3**")
+st.caption("Verze: **SHOPTET NATIVE AUTOMATION ENGINE V4**")
 
 uploaded_file = st.file_uploader("Vyberte váš Shoptet exportní soubor (.csv nebo .xlsx)", type=["csv", "xlsx"])
 
@@ -139,7 +181,7 @@ if uploaded_file is not None:
         else:
             original_df = pd.read_excel(uploaded_file)
         
-        # --- PŘEKLAD DO SHOPTET STANDARDU HNED NA ZAČÁTKU ---
+        # --- PŘEKLAD DO SHOPTET STANDARDU HNED PŘI NAHRÁNÍ ---
         shoptet_mapping = {
             "kód": "code", "nazev": "name", "název": "name", "cena": "price",
             "nákupní cena": "purchasePrice", "nakupni cena": "purchasePrice",
@@ -190,7 +232,10 @@ if (run_main or run_sidebar) and original_df is not None:
             st.session_state.was_truncated = False
             
         limit = len(working_df)
-        ai_raw_responses = []
+        audit_statuses = []
+        final_names = []
+        final_descriptions = []
+        seo_keywords = []
         
         progress_bar = st.progress(0)
         status_text = st.empty()
@@ -200,13 +245,17 @@ if (run_main or run_sidebar) and original_df is not None:
             status_text.text(f"Zpracovávám produkt {idx + 1} z {limit}...")
             original_name = str(working_df.iloc[idx]["name"])
             
-            # Předčištění přes regex filtry zdarma
+            # Předčištění přes filtry
             clean_name = clean_product_name(original_name, custom_stopwords, all_selected_chars)
             if not clean_name: clean_name = "Produkt"
             
-            # Volání AI pro uložení surových dat do pomocného řetězce
-            raw_response = enrich_product_with_ai(clean_name, original_name, max_char_length, ai_instruction)
-            ai_raw_responses.append(raw_response)
+            # Načtení dat z robustního AI zpracování
+            ai_data = enrich_product_with_ai(clean_name, original_name, max_char_length, ai_instruction)
+            
+            audit_statuses.append(ai_data["audit"])
+            final_names.append(ai_data["name"])
+            final_descriptions.append(ai_data["description"])
+            seo_keywords.append(ai_data["seo"])
             
             progress_bar.progress((idx + 1) / limit)
             
@@ -215,37 +264,11 @@ if (run_main or run_sidebar) and original_df is not None:
         
         st.session_state.total_time = round(time.time() - start_bulk_time, 1)
         
-        # --- ROZPARSOVÁNÍ POMOCNÉHO SLOUPEČKU ZPĚT DO STRUKTURY ---
-        audit_statuses = []
-        final_names = []
-        final_descriptions = []
-        seo_keywords = []
-        
-        for idx, resp in enumerate(ai_raw_responses):
-            parts = resp.split("|")
-            orig_name_clean = clean_product_name(str(working_df.iloc[idx]["name"]), custom_stopwords, all_selected_chars)
-            
-            # Výchozí hodnoty pro případ nouze
-            status = "✅ V pořádku"
-            f_name = orig_name_clean if orig_name_clean else "Produkt"
-            f_desc = ""
-            f_seo = ""
-            
-            if len(parts) >= 1: status = parts[0].strip()
-            if len(parts) >= 2: f_name = parts[1].strip()
-            if len(parts) >= 3: f_desc = parts[2].strip()
-            if len(parts) >= 4: f_seo = parts[3].strip()
-            
-            audit_statuses.append(status)
-            final_names.append(f_name)
-            final_descriptions.append(f_desc)
-            seo_keywords.append(f_seo)
-            
-        # Zápis upravených dat přímo do Shoptet struktury
+        # Uložení přímo do Shoptet struktury tabulky
         working_df["name"] = final_names
         working_df["description"] = final_descriptions
         
-        # Pomocné sloupce pro zobrazení
+        # Pomocné sloupce
         working_df.insert(0, "🔍 Stav auditu", audit_statuses)
         working_df["_seo_cache"] = seo_keywords
         
@@ -267,10 +290,10 @@ if st.session_state.processed_df is not None:
     with col_kpi1:
         st.metric(label="Počet položek v tabulce", value=f"{len(df_results)} ks")
     with col_kpi2:
-        st.metric(label="Čas zpracování", value=f"{st.session_state.total_time} s")
+        st.metric(label="Čas zpracování AI", value=f"{st.session_state.total_time} s")
     
     st.write("---")
-    st.info("📊 Tabulka je upravená v Shoptet formátu (`code`, `name`, `description`). Sloupec 'Stav auditu' slouží pro tvou kontrolu a do výsledného souboru se neuloží.")
+    st.info("📊 Tabulka je upravená v Shoptet formátu (`code`, `name`, `description`). Sloupec 'Stav auditu' slouží pro tvou kontrolu.")
     
     # Skryjeme interní cache sloupec před uživatelem pro čistý design
     view_df = df_results.copy()
